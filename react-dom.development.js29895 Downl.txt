@@ -1,0 +1,103 @@
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+deprecations.ts:9  ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+warnOnce @ deprecations.ts:9
+deprecations.ts:9  ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+warnOnce @ deprecations.ts:9
+Chat.tsx:223 Sending chat request: Object
+[NEW] Explain Console errors by using Copilot in Edge: click
+         
+         to explain an error. 
+        Learn more
+        Don't show again
+Chat.tsx:232 Stream received: ReadableStream {locked: false}
+Chat.tsx:248 Received chunk: [BOT_TYPE:sql_generator]
+Chat.tsx:248 Received chunk: Based on
+Chat.tsx:248 Received chunk:  the data
+Chat.tsx:248 Received chunk:  available,
+Chat.tsx:248 Received chunk:  the i
+Chat.tsx:248 Received chunk: Phone 
+Chat.tsx:248 Received chunk: 16 is
+Chat.tsx:248 Received chunk:  not listed
+Chat.tsx:248 Received chunk:  as available
+Chat.tsx:248 Received chunk:  on e
+Chat.tsx:248 Received chunk: & UAE
+Chat.tsx:248 Received chunk: . The
+Chat.tsx:248 Received chunk:  records provided
+Chat.tsx:248 Received chunk:  do not
+Chat.tsx:248 Received chunk:  include any
+Chat.tsx:248 Received chunk:  iPhone
+Chat.tsx:248 Received chunk:  16
+Chat.tsx:248 Received chunk:  models.
+Chat.tsx:248 Received chunk:  If you
+Chat.tsx:248 Received chunk:  are looking
+Chat.tsx:248 Received chunk:  for a
+Chat.tsx:248 Received chunk:  specific model
+Chat.tsx:248 Received chunk:  or configuration
+Chat.tsx:248 Received chunk: , please
+Chat.tsx:248 Received chunk:  let me
+Chat.tsx:248 Received chunk:  know,
+Chat.tsx:248 Received chunk:  and I
+Chat.tsx:248 Received chunk:  can assist
+Chat.tsx:248 Received chunk:  further.
+
+
+Chat.tsx:248 Received chunk: Would you
+Chat.tsx:248 Received chunk:  like me
+Chat.tsx:248 Received chunk:  to check
+Chat.tsx:248 Received chunk:  for other iPhone
+Chat.tsx:248 Received chunk:  models or
+Chat.tsx:248 Received chunk:  provide information
+Chat.tsx:248 Received chunk:  on available
+Chat.tsx:248 Received chunk:  smartphones from
+Chat.tsx:248 Received chunk:  e&?
+[SQL_RESULTS][{"table": "CombinedDevice", "query": "SELECT * FROM CombinedDevice WHERE brand_name LIKE '%eand%' AND device_type LIKE '%Smartphones%' AND (device_name LIKE '%iPhone 16%' OR device_name LIKE '%iPhone16%') AND device_name NOT LIKE '%Pro%' AND device_name NOT LIKE '%Max%' AND device_name NOT LIKE '%Plus%' AND device_name NOT LIKE '%16e%' AND availability LIKE '%In Stock%' AND run_id = 238 ORDER BY LEN(device_name) ASC;", "results": [{"table": "CombinedDevice", "primary_id": 938.0, "result_score": 0.5104947090148926, "result_source": "embedding", "internal_id": 938.0, "id": "68c9256c9c110d0dd32afb39", "amount": 1105.0, "amount_before_discount": 1299.0, "availability": "In Stock", "brand": "Honor", "brand_name": "eand", "description": "Honor X9C", "device_name": "Honor X9C", "device_type": "Smartphones", "is_preorder": 0.0, "installment_amount_for_12_months": 105.0, "installment_amount_for_18_months": 71.0, "installment_amount_for_24_months": 54.0, "is_new": "0", "limited_offer": "Limited time offer 14% Off", "processed_at": "2025-09-17T12:06:24.205000", "run_id": 237.0, "segment": "consumer", "storage": "256GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod1T1734440075723&skuId=bgskuTrans3805094177", "vat_included": 1.0, "vat_percentage": "5%", "display": "6.78 inches", "operating_system": "Android 14", "processor": "Qualcomm SM6450 Snapdragon 6 Gen 1 (4 nm)", "warranty": "1 Year", "battery": "6600mAh", "memory": "8GB", "color": "Jade Cyan", "product_id": "prod1T1734440075723", "item_id": "bgskuTrans3805094177", "additional_specifications": "categories : ['Smart phones', 'Smartphone', 'Back to School Smartphones']", "amount_with_vat": 1105.0, "amount_without_vat": 1052.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 130000.0, "front_camera": "16M", "rear_camera": "108M + 5M", "sim_type": "Nano-SIM + Nano-SIM"}, {"table": "CombinedDevice", "primary_id": 2044.0, "result_score": 0.5076693296432495, "result_source": "embedding", "internal_id": 2044.0, "id": "68c9258e9c110d0dd32b0cd1", "amount": 1525.0, "amount_before_discount": 1599.0, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Series 10 is a major milestone for Apple Watch. It features our biggest and most advanced display yet, showing more information onscreen than ever. With Apple\u00e2\u20ac\u2122s first wide-angle OLED Display, the screen is brighter when viewed from an angle, making it easier to read with a quick glance.", "device_name": "Watch Series 10 GPS Aluminum", "device_type": "Accessories", "is_preorder": 0.0, "installment_amount_for_12_months": 140.0, "installment_amount_for_18_months": 95.0, "installment_amount_for_24_months": 70.0, "is_new": "1", "limited_offer": "Limited time offer 4% Off", "processed_at": "2025-09-17T12:06:24.260000", "run_id": 237.0, "segment": "consumer", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2540050&skuId=bgSku3999220568", "vat_included": 1.0, "vat_percentage": "5%", "connectivity": "GPS, Wi-Fi 4 (802.11n)\r\nBluetooth 5.3\r\nSecond-generation Ultra Wideband chip\r\nApple Pay\r\nGymKit\r\nSupport for Apple Watch For Your Kids", "display": "Always-On Retina LTPO3 display\r\nWide-angle OLED\r\nUp to 40% brighter when viewed at an angle\r\nEdge-to-edge display\r\nIon-X front glass (aluminum cases)\r\nSapphire front crystal (titanium cases)\r\nUp to 2000 nits maximum brightness\r\n1 nit minimum brightness\r\n326 pixels per inch", "operating_system": "watchOS 11 is the world\u2019s most advanced wearable operating system, with apps", "processor": "S10 SiP with 64-bit dual core processor\r\n4-core Neural Engine\r\n64GB capacity", "warranty": "1Year", "sensors": "Electrical heart sensor\r\nThird-generation optical heart sensor\r\nBlood oxygen sensor\r\nTemperature sensor\r\nCompass\r\nAlways-on altimeter\r\nHigh-g accelerometer\r\nHigh dynamic range gyroscope\r\nAmbient light sensor\r\nDepth gauge\r\nWater temperature sensor", "battery_details": "power_and_battery_life : All-day battery life, up to 18 hours of normal use\r\nUp to 36 hours in Low Power Mode\r\nBuilt-in rechargeable lithium-ion battery\r\nFast-charge capable\r\nUp to 80% charge in about 30 minutes\r\n15 minutes for up to 8 hours of normal use\r\n8 minutes for up to 8 hours of sleep tracking", "color": "Silver", "product_id": "prod2540050", "item_id": "bgSku3999220568", "additional_specifications": "categories : ['Other Smartwatches']\ncontrols : Digital Crown with haptic feedback\r\nSide button\r\nDouble tap gesture\nhealth_and_wellness : ECG app\r\nCycle Tracking app with retrospective ovulation estimates\r\nHeart Rate app\r\nBlood Oxygen app\r\nHigh and low heart rate notifications\r\nIrregular rhythm notifications\r\nMedications app\r\nMindfulness app with state of mind tracking\r\nNoise app\r\nSleep app including sleep stages\naudio : Speaker\r\n
+Chat.tsx:248 Received chunk: 37.0, "segment": "consumer", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=full-prod2370100&skuId=full-bgSku4120901869", "vat_included": 1.0, "vat_percentage": "5%", "product_id": "full-prod2370100", "item_id": "full-bgSku4120901869", "additional_specifications": "categories : ['Smart TVs and Monitors']", "amount_with_vat": 689.0, "amount_without_vat": 656.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 81059.0}]}][END_SQL_RESULTS]
+Chat.tsx:257 SQL Results: [{…}]0: {table: 'CombinedDevice', query: "SELECT * FROM CombinedDevice WHERE brand_name LIKE…' AND run_id = 238 ORDER BY LEN(device_name) ASC;", results: Array(10)}length: 1[[Prototype]]: Array(0)
+Chat.tsx:243 Stream finished
+EnhancedResultsPanel.tsx:135  Error processing results: ReferenceError: Cannot access 'formatTableType' before initialization
+    at EnhancedResultsPanel.tsx:115:23
+    at Array.forEach (<anonymous>)
+    at EnhancedResultsPanel.tsx:113:18
+    at updateMemo (react-dom.development.js:16427:19)
+    at Object.useMemo (react-dom.development.js:17067:16)
+    at useMemo (react.development.js:1650:21)
+    at EnhancedResultsPanel (EnhancedResultsPanel.tsx:84:59)
+    at renderWithHooks (react-dom.development.js:15486:18)
+    at updateFunctionComponent (react-dom.development.js:19617:20)
+    at beginWork (react-dom.development.js:21640:16)
+(anonymous) @ EnhancedResultsPanel.tsx:135
+updateMemo @ react-dom.development.js:16427
+useMemo @ react-dom.development.js:17067
+useMemo @ react.development.js:1650
+EnhancedResultsPanel @ EnhancedResultsPanel.tsx:84
+renderWithHooks @ react-dom.development.js:15486
+updateFunctionComponent @ react-dom.development.js:19617
+beginWork @ react-dom.development.js:21640
+beginWork$1 @ react-dom.development.js:27465
+performUnitOfWork @ react-dom.development.js:26596
+workLoopSync @ react-dom.development.js:26505
+renderRootSync @ react-dom.development.js:26473
+performConcurrentWorkOnRoot @ react-dom.development.js:25777
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
+dialog.tsx:543  Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+(anonymous) @ dialog.tsx:543
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+commitRootImpl @ react-dom.development.js:26974
+commitRoot @ react-dom.development.js:26721
+performSyncWorkOnRoot @ react-dom.development.js:26156
+flushSyncCallbacks @ react-dom.development.js:12042
+commitRootImpl @ react-dom.development.js:26998
+commitRoot @ react-dom.development.js:26721
+finishConcurrentRender @ react-dom.development.js:26020
+performConcurrentWorkOnRoot @ react-dom.development.js:25848
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
