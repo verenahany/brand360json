@@ -46,151 +46,300 @@ performWorkUntilDeadline @ scheduler.development.js:533
          to explain an error. 
         Learn more
         Don't show again
-Chat.tsx:324 Loading sessions...
-Chat.tsx:299 [DEBUG] Last message in state: undefined
-Chat.tsx:326 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
-Chat.tsx:324 Loading sessions...
-Chat.tsx:299 [DEBUG] Last message in state: undefined
-Chat.tsx:326 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
-Chat.tsx:324 Loading sessions...
-Chat.tsx:326 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
-Chat.tsx:585 Sending chat request: {query: 'iphone 11 e&', session_id: 'f8f9f1db-9bfe-4154-8d08-32eefe511d5a', web_search_enabled: true}
-Chat.tsx:590 Expected API endpoint: /api/chat
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: '', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:604 Stream received: ReadableStream {locked: false}
-Chat.tsx:619 Received chunk: [BOT_TYPE:sql_generator]
-Chat.tsx:619 Received chunk: It seems
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  that there
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  are no
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  records available
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  for the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  iPhone
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  11
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  under the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  e&
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e&', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  brand in
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  the UAE
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in the UAE', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  at the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in the UAE at the', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  moment.
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…e 11 under the e& brand in the UAE at the moment.', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  The data
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…r the e& brand in the UAE at the moment. The data', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  provided does
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t… in the UAE at the moment. The data provided does', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  not include
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…at the moment. The data provided does not include', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  any configurations
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…data provided does not include any configurations', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  for the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…vided does not include any configurations for the', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  iPhone
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…oes not include any configurations for the iPhone', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  11
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t… not include any configurations for the iPhone 11', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: .
+Chat.tsx:311 Loading sessions...
+Chat.tsx:313 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
+Chat.tsx:363 Loading session: 8cd6db2f-09c5-46a1-ab8f-b121e439e4a2
+Chat.tsx:364 API URL will be: /api/sessions/8cd6db2f-09c5-46a1-ab8f-b121e439e4a2/messages
+Chat.tsx:368 Session messages loaded: (2) [{…}, {…}]
+Chat.tsx:369 Messages count: 2
+Chat.tsx:370 Message structure (first): {message_id: '58e604ca-f959-4d83-b5e6-795e9ad7e78e', session_id: '8cd6db2f-09c5-46a1-ab8f-b121e439e4a2', sender: 'user', content: 'IPHONE 12 DU', timestamp: '2025-09-27T03:38:27.083000', …}
+Chat.tsx:429 Message 0 normalized results: {sql: 0, web: 0, originalSql: 0, originalWeb: 0, sqlSample: undefined, …}
+Chat.tsx:429 Message 1 normalized results: {sql: 2, web: 0, originalSql: 1, originalWeb: 0, sqlSample: {…}, …}
+dialog.tsx:543  Warning: Missing `Description` or `aria-describedby={undefined}` for {DialogContent}.
+(anonymous) @ dialog.tsx:543
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+commitRootImpl @ react-dom.development.js:26974
+commitRoot @ react-dom.development.js:26721
+performSyncWorkOnRoot @ react-dom.development.js:26156
+flushSyncCallbacks @ react-dom.development.js:12042
+commitRootImpl @ react-dom.development.js:26998
+commitRoot @ react-dom.development.js:26721
+finishConcurrentRender @ react-dom.development.js:26020
+performConcurrentWorkOnRoot @ react-dom.development.js:25848
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
+Chat.tsx:311 Loading sessions...
+Chat.tsx:313 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
+Chat.tsx:497 === SEND MESSAGE CALLED === IPHONE 13 DUUU
+Chat.tsx:311 Loading sessions...
+Chat.tsx:313 Sessions loaded: (20) [{…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}, {…}]
+Chat.tsx:548 Sending chat request: {query: 'IPHONE 13 DUUU', session_id: '04923f0e-1a06-4de7-badb-ad5c20613341', web_search_enabled: true}
+Chat.tsx:549 Expected API endpoint: /api/chat
+Chat.tsx:567 Stream received: ReadableStream {locked: false}
+Chat.tsx:582 Received chunk: [BOT_TYPE:sql_generator]
+Chat.tsx:582 Received chunk: Here are the available
+Chat.tsx:582 Received chunk:  configurations for
+Chat.tsx:582 Received chunk:  the i
+Chat.tsx:582 Received chunk: Phone 
+Chat.tsx:582 Received chunk: 13 on
+Chat.tsx:582 Received chunk:  du:
 
-Would
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…lude any configurations for the iPhone 11.\n\nWould', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  you like
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…configurations for the iPhone 11.\n\nWould you like', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  me to
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…urations for the iPhone 11.\n\nWould you like me to', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  search for
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…r the iPhone 11.\n\nWould you like me to search for', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  other i
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…hone 11.\n\nWould you like me to search for other i', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: Phone models
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…uld you like me to search for other iPhone models', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  or check
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…ike me to search for other iPhone models or check', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  availability with
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…or other iPhone models or check availability with', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  a different
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…one models or check availability with a different', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  brand?
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…els or check availability with a different brand?', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: 
-[SQL_RESULTS][{"table": "CombinedDevice", "query": "SELECT * FROM CombinedDevice WHERE brand_name LIKE '%eand%' AND device_type LIKE '%Smartphones%' AND (device_name LIKE '%iPhone 11%' OR device_name LIKE '%iPhone11%') AND amount > 0 AND amount IS NOT NULL AND run_id = (SELECT MAX(run_id) FROM CombinedDevice WHERE brand_name LIKE '%eand%') ORDER BY LEN(device_name) ASC;", "results": [{"table": "CombinedDevice", "primary_id": 404.0, "result_score": 0.5387517213821411, "result_source": "embedding", "internal_id": 404.0, "id": "68c9255c9c110d0dd32af2cb", "amount": 4625.0, "amount_before_discount": 7199.0, "availability": "In Stock", "brand": "Samsung", "brand_name": "eand", "description": "Put PC-like power in your pocket, Galaxy Z Fold6. More powerful than ever with its super-slim, productive screen. Now super-charged with Galaxy AI on foldables.", "device_name": "Galaxy Z Fold6", "device_type": "Smartphones", "is_preorder": 0.0, "installment_amount_for_12_months": 438.0, "installment_amount_for_18_months": 295.0, "installment_amount_for_24_months": 225.0, "is_new": "1", "limited_offer": "Limited time offer 35% Off", "processed_at": "2025-09-17T12:06:15.263000", "run_id": 237.0, "segment": "consumer", "storage": "256GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2530025&skuId=bgSku3804101596", "vat_included": 1.0, "vat_percentage": "5%", "display": "7.6 inches 2160 x 1856 (QXGA+) Dynamic AMOLED 2X| 193.2mm", "operating_system": "Android 14", "processor": "Qualcomm | Snapdragon 8 Gen3 for Galaxy", "warranty": "1 Year", "battery": "4400mAh", "memory": "12GB", "color": "SILVER SHADOW", "product_id": "prod2530025", "item_id": "bgSku3804101596", "additional_specifications": "categories : ['Smart phones', 'Smartphone']", "amount_with_vat": 4625.0, "amount_without_vat": 4405.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 544118.0, "front_camera": "4MP (F1.8)", "rear_camera": "50MP (F1.8),12MP (F2.2),10MP (F2.4)", "network": "5G", "sim_type": "SIM 1 + SIM 2 / SIM 1 + eSIM / Dual eSIM"}, {"table": "CombinedDevice", "primary_id": 1483.0, "result_score": 0.5200233459472656, "result_source": "embedding", "internal_id": 1483.0, "id": "68c9257d9c110d0dd32b03c9", "amount": 126.0, "availability": "In Stock", "brand": "Logitech", "brand_name": "eand", "description": "Logitech Logitech Gamepad F710", "device_name": "Logitech Logitech Gamepad F710", "device_type": "Gaming", "is_preorder": 0.0, "is_new": "0", "processed_at": "2025-09-17T12:05:48.028000", "run_id": 237.0, "segment": "consumer", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod830037&skuId=bgSku4120938013", "vat_included": 1.0, "vat_percentage": "5%", "dimensions": "168 x 79 x 200mm", "weight": "410g", "color": "Silver", "compatibility": "Windows\u00ae 10, Windows 8, Windows 7, or Windows Vista, Chrome OS\u2122", "product_id": "prod830037", "item_id": "bgSku4120938013", "additional_specifications": "categories : ['Gaming Controllers']\npower : 2 x AA batteries", "amount_with_vat": 126.0, "amount_without_vat": 120.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 14824.0, "type": "Wireless Gamepad", "material": "Stainless Steel"}, {"table": "CombinedDevice", "primary_id": 652.0, "result_score": 0.5151188969612122, "result_source": "embedding", "internal_id": 652.0, "id": "68c925639c110d0dd32af6ac", "amount": 5999.0, "amount_before_discount": 6599.0, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "The first iPhone with an aerospace\u00e2\u20ac\u2018grade titanium design. A17 Pro, a game\u00e2\u20ac\u2018changing chip. A customizable Action button. The most powerful iPhone camera system. And USB\u00e2\u20ac\u2018C with USB 3 for superfast transfer speeds.\\*", "device_name": "iPhone 15 Pro Max", "device_type": "Smartphones", "is_preorder": 0.0, "installment_amount_for_12_months": 563.0, "installment_amount_for_18_months": 382.0, "installment_amount_for_24_months": 291.0, "is_new": "0", "limited_offer": "Limited time offer 9% Off", "processed_at": "2025-09-17T12:05:25.644000", "run_id": 237.0, "segment": "consumer", "storage": "1TB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2210066&skuId=bgSku3820208132", "vat_included": 1.0, "vat_percentage": "5%", "display": "6.7 inches Super Retina XDR\r\n\r\nProMotion technology\r\n\r\nAlways-On display\r\n\r\nLTPO Super Retina XDR OLED, 120Hz, HDR10, Dolby Vision, 1000 nits (typ), 2000 nits (HBM)", "operating_system": "iOS 17", "processor": "Apple A17 Pro (3 nm)", "warranty": "1 Year", "battery": "Video playback:\r\nUp to 29 hours\r\nVideo playback (streamed):\r\nUp to 25 hours\r\nAudio playback:\r\nUp to 95 hours\r\nFast-charge capable:\r\nUp to 50% charge in around 30 minutes8 with 20W adapter or higher (available separa
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…"bgskuTrans3804110789", "additional_specification', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: s": "max_allowed_quantity : 10\ncategories : ['Smartphone', 'Trending']\nbundle_offer : Unlimited data for free\r\nGoogle Gemini - 2TB Gemini Storage \u2013 6 months free on us\r\nSamsung Members inc (Go Learning subscription + Smiles)\r\n4 months free on Samsung care +\r\nPicart Pro with 500 AI credit", "amount_with_vat": 8099.0, "amount_without_vat": 7713.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 952824.0, "front_camera": "10MP, Cover: 10MP", "rear_camera": "200MP + 12MP+10MP", "network": "5G", "sim_type": "Dual + eSIM"}]}][END_SQL_RESULTS]
-Chat.tsx:614 Stream finished
-Chat.tsx:964 Chat interaction completed - messages should be persisted by backend
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921569269', sender: 'assistant', content: 'It seems that there are no records available for t…", "sim_type": "Dual + eSIM"}]}][END_SQL_RESULTS]', timestamp: Sat Sep 27 2025 01:19:29 GMT+0400 (Gulf Standard Time), isStreaming: false}
-Chat.tsx:585 Sending chat request: {query: 'iphone 11 e&', session_id: 'f8f9f1db-9bfe-4154-8d08-32eefe511d5a', web_search_enabled: false}
-Chat.tsx:590 Expected API endpoint: /api/chat
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: '', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:604 Stream received: ReadableStream {locked: false}
-Chat.tsx:619 Received chunk: [BOT_TYPE:sql_generator]
-Chat.tsx:619 Received chunk: It seems that there
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  are no
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  records available
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  for the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  iPhone
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  11 under the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  e&
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e&', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  brand in
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  the UAE
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in the UAE', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  at the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for the iPhone 11 under the e& brand in the UAE at the', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  moment.
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…e 11 under the e& brand in the UAE at the moment.', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  The data
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…r the e& brand in the UAE at the moment. The data', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  provided does
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t… in the UAE at the moment. The data provided does', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  not include
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…at the moment. The data provided does not include', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  any configurations
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…data provided does not include any configurations', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  for the
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…vided does not include any configurations for the', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  iPhone
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…oes not include any configurations for the iPhone', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  11
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t… not include any configurations for the iPhone 11', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: .
 
-Would you like
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…configurations for the iPhone 11.\n\nWould you like', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  me to
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…urations for the iPhone 11.\n\nWould you like me to', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  search for
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…r the iPhone 11.\n\nWould you like me to search for', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  other i
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…hone 11.\n\nWould you like me to search for other i', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: Phone models
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…uld you like me to search for other iPhone models', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  or check
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…ike me to search for other iPhone models or check', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  availability with
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…or other iPhone models or check availability with', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk:  a different
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…one models or check availability with a different', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}content: "It seems that there are no records available for the iPhone 11 under the e& brand in the UAE at the moment. The data provided does not include any configurations for the iPhone 11.\n\nWould you like me to search for other iPhone models or check availability with a different"id: "assistant-1758921606491"isStreaming: truesender: "assistant"timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time) {}[[Prototype]]: Object
-Chat.tsx:619 Received chunk:  brand?
-[SQL_RESULTS][{"table": "CombinedDevice", "query": "SELECT * FROM CombinedDevice WHERE brand_name LIKE '%eand%' AND device_type LIKE '%Smartphones%' AND (device_name LIKE '%iPhone 11%' OR device_name LIKE '%iPhone11%') AND run_id = (SELECT MAX(run_id) FROM CombinedDevice WHERE brand_name LIKE '%eand%') ORDER BY LEN(device_name) ASC;", "results": [{"table": "CombinedDevice", "primary_id": 404.0, "result_score": 0.48567694425582886, "result_source": "embedding", "internal_id": 404.0, "id": "68c9255c9c110d0dd32af2cb", "amount": 4625.0, "amount_before_discount": 7199.0, "availability": "In Stock", "brand": "Samsung", "brand_name": "eand", "description": "Put PC-like power in your pocket, Galaxy Z Fold6. More powerful than ever with its super-slim, productive screen. Now super-charged with Galaxy AI on foldables.", "device_name": "Galaxy Z Fold6", "device_type": "Smartphones", "is_preorder": 0.0, "installment_amount_for_12_months": 438.0, "installment_amount_for_18_months": 295.0, "installment_amount_for_24_months": 225.0, "is_new": "1", "limited_offer": "Limited time offer 35% Off", "processed_at": "2025-09-17T12:06:15.263000", "run_id": 237.0, "segment": "consumer", "storage": "256GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2530025&skuId=bgSku3804101596", "vat_included": 1.0, "vat_percentage": "5%", "display": "7.6 inches 2160 x 1856 (QXGA+) Dynamic AMOLED 2X| 193.2mm", "operating_system": "Android 14", "processor": "Qualcomm | Snapdragon 8 Gen3 for Galaxy", "warranty": "1 Year", "battery": "4400mAh", "memory": "12GB", "color": "SILVER SHADOW", "product_id": "prod2530025", "item_id": "bgSku3804101596", "additional_specifications": "categories : ['Smart phones', 'Smartphone']", "amount_with_vat": 4625.0, "amount_without_vat": 4405.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 544118.0, "front_camera": "4MP (F1.8)", "rear_camera": "50MP (F1.8),12MP (F2.2),10MP (F2.4)", "network": "5G", "sim_type": "SIM 1 + SIM 2 / SIM 1 + eSIM / Dual eSIM"}, {"table": "CombinedDevice", "primary_id": 1856.0, "result_score": 0.4769713282585144, "result_source": "embedding", "internal_id": 1856.0, "id": "68c925899c110d0dd32b09cd", "amount": 2399.0, "amount_before_discount": 2499.0, "availability": "In Stock", "brand": "Apple", "brand_name": "eand", "description": "iPad Air M3 2025 11-inch", "device_name": "iPad Air M3 2025 11-inch", "device_type": "Tablets", "is_preorder": 0.0, "installment_amount_for_12_months": 218.0, "installment_amount_for_18_months": 147.0, "installment_amount_for_24_months": 111.0, "is_new": "1", "limited_offer": "Limited time offer 4% Off", "processed_at": "2025-09-17T12:05:13.757000", "run_id": 237.0, "segment": "consumer", "storage": "128GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod1T1741258054704&skuId=bgskuTrans3820239139", "vat_included": 1.0, "vat_percentage": "5%", "display": "11.0 inches, 357.6 cm2\u00a0(~80.9% screen-to-body ratio)", "processor": "Apple M3 Octa-core (4 performance cores and 4 efficiency cores)", "warranty": "1 Year", "battery": "Li-Po 7606 mAh (28.93 Wh)", "memory": "8GB", "color": "Purple", "graphics": "Apple GPU (9-core graphics)", "resolution": "1640 x 2360 pixels (~264 ppi density)", "product_id": "prod1T1741258054704", "item_id": "bgskuTrans3820239139", "additional_specifications": "categories : ['Tablets', 'Back to School Tablets']", "amount_with_vat": 2399.0, "amount_without_vat": 2285.0, "allow_smartpay": 1.0, "allow_onetime_payment": 1.0, "vat_eligible": 1.0, "allow_payment_with_loyalty_points": 1.0, "smile_points": 282236.0, "features": "Fingerprint (top-mounted), accelerometer, gyro, compass, barometer", "network": "WI-FI", "main_camera": "12 MP"}, {"table": "CombinedDevice", "primary_id": 192.0, "result_score": 0.47689497470855713, "result_source": "embedding", "internal_id": 192.0, "id": "68c925559c110d0dd32aef79", "amount": 2129.0, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Powerful A15 Bionic chip. New all\u00e2\u20ac\u2018screen design. Superfast 5G. Ultra Wide front camera with Center Stage. Now in four gorgeous colors.", "device_name": "iPad mini (6th generation)", "device_type": "Tablets", "is_preorder": 0.0, "installment_amount_for_12_months": 185.0, "installment_amount_for_18_months": 125.0, "installment_amount_for_24_months": 95.0, "is_new": "0", "processed_at": "2025-09-17T12:05:59.097000", "run_id": 237.0, "segment": "consumer", "storage": "64GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod1470039&skuId=bgSku3820205627", "vat_included": 1.0, "vat_percentage": "5%", "connectivity": "Wi-Fi", "display": "Liquid Retina display\n8.3-inch (diagonal) LED-backlit Multi-Touch display with IPS technology\n2266-by-1488 resolution at 326 pixels per inch (ppi)\nWide color display (P3)\nTrue Tone display\nFingerprint-resistant
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…/1.8, 24mm (wide), 1/1.28\\", 1.22\\u00b5m, dual pi', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: true}
-Chat.tsx:619 Received chunk: xel PDAF, sensor-shift OIS\r\n12 MP, f/2.8, 120mm (periscope telephoto), 1.12\u00b5m, dual pixel PDAF, 3D sensor shift OIS, 5x optical zoom\r\n12 MP, f/2.2, 13mm, 120 (ultrawide), 1/2.55\", 1.4\u00b5m, dual pixel PDAF\r\nTOF 3D LiDAR scanner (depth)", "whats_in_the_box": "iPhone 15 Pro Max  with USB-C Charge Cable", "network": "5G", "sim_type": "Nano-SIM +\u00a0eSIM"}]}][END_SQL_RESULTS]
-Chat.tsx:614 Stream finished
-Chat.tsx:964 Chat interaction completed - messages should be persisted by backend
-Chat.tsx:299 [DEBUG] Last message in state: {id: 'assistant-1758921606491', sender: 'assistant', content: 'It seems that there are no records available for t…ype": "Nano-SIM +\\u00a0eSIM"}]}][END_SQL_RESULTS]', timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time), isStreaming: false}content: "It seems that there are no records available for id: "assistant-1758921606491"isStreaming: falsesender: "assistant"timestamp: Sat Sep 27 2025 01:20:06 GMT+0400 (Gulf Standard Time) {}[[Prototype]]: Object
+Chat.tsx:582 Received chunk: | Storage
+Chat.tsx:582 Received chunk:  | Color
+Chat.tsx:582 Received chunk:        |
+Chat.tsx:582 Received chunk:  Amount |
+Chat.tsx:582 Received chunk:  Availability |
+Chat.tsx:582 Received chunk:  Installment
+Chat.tsx:582 Received chunk:  (12
+Chat.tsx:582 Received chunk:  months)
+Chat.tsx:582 Received chunk:  | Install
+Chat.tsx:582 Received chunk: ment (
+Chat.tsx:582 Received chunk: 24 months
+Chat.tsx:582 Received chunk: ) |
+Chat.tsx:582 Received chunk:  Promotion   
+Chat.tsx:582 Received chunk:  | URL
+Chat.tsx:582 Received chunk:                                                                  |
+Chat.tsx:582 Received chunk:  Other Color
+Chat.tsx:582 Received chunk:  Options   
+Chat.tsx:582 Received chunk:  |
+|
+Chat.tsx:582 Received chunk: ---------|
+Chat.tsx:582 Received chunk: -------------|
+Chat.tsx:582 Received chunk: --------|
+Chat.tsx:582 Received chunk: --------------|
+Chat.tsx:582 Received chunk: -------------------------
+Chat.tsx:582 Received chunk: |----------------
+Chat.tsx:582 Received chunk: ---------|
+Chat.tsx:582 Received chunk: --------------|
+Chat.tsx:582 Received chunk: ---------------------------------------------------------------------
+Chat.tsx:582 Received chunk: |----------------
+Chat.tsx:582 Received chunk: --------|
+
+Chat.tsx:582 Received chunk: | 
+Chat.tsx:582 Received chunk: 128GB   |
+Chat.tsx:582 Received chunk:  Midnight   
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  209
+Chat.tsx:582 Received chunk: 9 |
+Chat.tsx:582 Received chunk:  Out of
+Chat.tsx:582 Received chunk:  Stock |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 172                
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  86
+Chat.tsx:582 Received chunk:                   |
+Chat.tsx:582 Received chunk:  -           
+Chat.tsx:582 Received chunk:  | [
+Chat.tsx:582 Received chunk: Link to
+Chat.tsx:582 Received chunk:  128
+Chat.tsx:582 Received chunk: GB Midnight
+Chat.tsx:582 Received chunk: ](https
+Chat.tsx:582 Received chunk: ://shop
+Chat.tsx:582 Received chunk: .du.a
+Chat.tsx:582 Received chunk: e/en
+Chat.tsx:582 Received chunk: /personal
+Chat.tsx:582 Received chunk: /Mobile
+Chat.tsx:582 Received chunk: -phones
+Chat.tsx:582 Received chunk: /iphone
+Chat.tsx:582 Received chunk: -13
+Chat.tsx:582 Received chunk: -p-C
+Chat.tsx:582 Received chunk: OM-H
+Chat.tsx:582 Received chunk: S-
+Chat.tsx:582 Received chunk: APP-
+Chat.tsx:582 Received chunk: 608#
+Chat.tsx:582 Received chunk: r=c
+Chat.tsx:582 Received chunk: OJXe
+Chat.tsx:582 Received chunk: _1
+Chat.tsx:582 Received chunk: ) |
+Chat.tsx:582 Received chunk:  Pink                  
+Chat.tsx:582 Received chunk:  |
+|
+Chat.tsx:582 Received chunk:  128
+Chat.tsx:582 Received chunk: GB  
+Chat.tsx:582 Received chunk:  | Pink
+Chat.tsx:582 Received chunk:         |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 2099
+Chat.tsx:582 Received chunk:  | Out
+Chat.tsx:582 Received chunk:  of Stock
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  172                 |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 86                  | -
+Chat.tsx:582 Received chunk:             |
+Chat.tsx:582 Received chunk:  [Link
+Chat.tsx:582 Received chunk:  to 
+Chat.tsx:582 Received chunk: 128GB
+Chat.tsx:582 Received chunk:  Pink](
+Chat.tsx:582 Received chunk: https://
+Chat.tsx:582 Received chunk: shop.du
+Chat.tsx:582 Received chunk: .ae
+Chat.tsx:582 Received chunk: /en/p
+Chat.tsx:582 Received chunk: ersonal/M
+Chat.tsx:582 Received chunk: obile-
+Chat.tsx:582 Received chunk: phones/
+Chat.tsx:582 Received chunk: iphone-
+Chat.tsx:582 Received chunk: 13-p
+Chat.tsx:582 Received chunk: -COM
+Chat.tsx:582 Received chunk: -HS
+Chat.tsx:582 Received chunk: -APP
+Chat.tsx:582 Received chunk: -610
+Chat.tsx:582 Received chunk: #r
+Chat.tsx:582 Received chunk: =Su
+Chat.tsx:582 Received chunk: BSS
+Chat.tsx:582 Received chunk: _2
+Chat.tsx:582 Received chunk: )    
+Chat.tsx:582 Received chunk:  | Midnight
+Chat.tsx:582 Received chunk:                |
+
+Chat.tsx:582 Received chunk: | 
+Chat.tsx:582 Received chunk: 256GB
+Chat.tsx:582 Received chunk:    |
+Chat.tsx:582 Received chunk:  Starl
+Chat.tsx:582 Received chunk: ight  
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  359
+Chat.tsx:582 Received chunk: 9 |
+Chat.tsx:582 Received chunk:  Out of
+Chat.tsx:582 Received chunk:  Stock |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 318                
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  159
+Chat.tsx:582 Received chunk:                  |
+Chat.tsx:582 Received chunk:  -           
+Chat.tsx:582 Received chunk:  | [
+Chat.tsx:582 Received chunk: Link to
+Chat.tsx:582 Received chunk:  256
+Chat.tsx:582 Received chunk: GB St
+Chat.tsx:582 Received chunk: arlight
+Chat.tsx:582 Received chunk: ](https
+Chat.tsx:582 Received chunk: ://shop
+Chat.tsx:582 Received chunk: .du.a
+Chat.tsx:582 Received chunk: e/en
+Chat.tsx:582 Received chunk: /personal
+Chat.tsx:582 Received chunk: /Mobile
+Chat.tsx:582 Received chunk: -phones
+Chat.tsx:582 Received chunk: /iphone
+Chat.tsx:582 Received chunk: -13
+Chat.tsx:582 Received chunk: -p-C
+Chat.tsx:582 Received chunk: OM-H
+Chat.tsx:582 Received chunk: S-
+Chat.tsx:582 Received chunk: APP-
+Chat.tsx:582 Received chunk: 614#
+Chat.tsx:582 Received chunk: r=
+Chat.tsx:582 Received chunk: FEX
+Chat.tsx:582 Received chunk: FV_
+Chat.tsx:582 Received chunk: 3)
+Chat.tsx:582 Received chunk:  | (
+Chat.tsx:582 Received chunk: PRODUCT)
+Chat.tsx:582 Received chunk: RED,
+Chat.tsx:582 Received chunk:  Blue   
+Chat.tsx:582 Received chunk:  |
+|
+Chat.tsx:582 Received chunk:  256
+Chat.tsx:582 Received chunk: GB  
+Chat.tsx:582 Received chunk:  | (PRODUCT)RED|
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 3830
+Chat.tsx:582 Received chunk:  | Out
+Chat.tsx:582 Received chunk:  of Stock
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  212
+Chat.tsx:582 Received chunk:                  |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 106                
+Chat.tsx:582 Received chunk:  | -
+Chat.tsx:582 Received chunk:             |
+Chat.tsx:582 Received chunk:  [Link
+Chat.tsx:582 Received chunk:  to 
+Chat.tsx:582 Received chunk: 256GB
+Chat.tsx:582 Received chunk:  (PRODUCT
+Chat.tsx:582 Received chunk: )RED
+Chat.tsx:582 Received chunk: ](https
+Chat.tsx:582 Received chunk: ://shop
+Chat.tsx:582 Received chunk: .du.a
+Chat.tsx:582 Received chunk: e/en
+Chat.tsx:582 Received chunk: /personal
+Chat.tsx:582 Received chunk: /Mobile
+Chat.tsx:582 Received chunk: -phones
+Chat.tsx:582 Received chunk: /iphone
+Chat.tsx:582 Received chunk: -13
+Chat.tsx:582 Received chunk: -p-C
+Chat.tsx:582 Received chunk: OM-H
+Chat.tsx:582 Received chunk: S-
+Chat.tsx:582 Received chunk: APP-
+Chat.tsx:582 Received chunk: 616#
+Chat.tsx:582 Received chunk: r=r
+Chat.tsx:582 Received chunk: beqx
+Chat.tsx:582 Received chunk: _4
+Chat.tsx:582 Received chunk: ) |
+Chat.tsx:582 Received chunk:  Starl
+Chat.tsx:582 Received chunk: ight, Blue      
+Chat.tsx:582 Received chunk:  |
+|
+Chat.tsx:582 Received chunk:  256
+Chat.tsx:582 Received chunk: GB  
+Chat.tsx:582 Received chunk:  | Blue
+Chat.tsx:582 Received chunk:         |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 2564
+Chat.tsx:582 Received chunk:  | Out
+Chat.tsx:582 Received chunk:  of Stock
+Chat.tsx:582 Received chunk:  | AED
+Chat.tsx:582 Received chunk:  414
+Chat.tsx:582 Received chunk:                  |
+Chat.tsx:582 Received chunk:  AED 
+Chat.tsx:582 Received chunk: 207                
+Chat.tsx:582 Received chunk:  | Special
+Chat.tsx:582 Received chunk:  Offer |
+Chat.tsx:582 Received chunk:  [Link
+Chat.tsx:582 Received chunk:  to 
+Chat.tsx:582 Received chunk: 256GB
+Chat.tsx:582 Received chunk:  Blue](
+Chat.tsx:582 Received chunk: https://
+Chat.tsx:582 Received chunk: shop.du
+Chat.tsx:582 Received chunk: .ae
+Chat.tsx:582 Received chunk: /en/personal/M
+Chat.tsx:582 Received chunk: obile-phones/
+Chat.tsx:582 Received chunk: iphone-
+Chat.tsx:582 Received chunk: 13-p
+Chat.tsx:582 Received chunk: -COM
+Chat.tsx:582 Received chunk: -HS
+Chat.tsx:582 Received chunk: -APP
+Chat.tsx:582 Received chunk: -617
+Chat.tsx:582 Received chunk: #r
+Chat.tsx:582 Received chunk: =F
+Chat.tsx:582 Received chunk: istx
+Chat.tsx:582 Received chunk: _5
+Chat.tsx:582 Received chunk: )    
+Chat.tsx:582 Received chunk:  | St
+Chat.tsx:582 Received chunk: arlight
+Chat.tsx:582 Received chunk: , (
+Chat.tsx:582 Received chunk: PRODUCT)RED |
+
+
+Chat.tsx:582 Received chunk: Please note
+Chat.tsx:582 Received chunk:  that all
+Chat.tsx:582 Received chunk:  configurations are
+Chat.tsx:582 Received chunk:  currently out
+Chat.tsx:582 Received chunk:  of stock
+Chat.tsx:582 Received chunk: . Let
+Chat.tsx:582 Received chunk:  me know
+Chat.tsx:582 Received chunk:  if you
+Chat.tsx:582 Received chunk:  need further
+Chat.tsx:582 Received chunk:  assistance or
+Chat.tsx:582 Received chunk:  information!
+Chat.tsx:582 Received chunk: 
+[SQL_RESULTS][{"table": "CombinedDevice", "query": "SELECT * FROM CombinedDevice WHERE brand_name LIKE '%du%' AND device_type LIKE '%Smartphones%' AND (device_name LIKE '%iPhone 13%' OR device_name LIKE '%iPhone13%') AND device_name NOT LIKE '%Pro%' AND device_name NOT LIKE '%Max%' AND device_name NOT LIKE '%Mini%' AND amount > 0 AND amount IS NOT NULL AND run_id = (SELECT MAX(run_id) FROM CombinedDevice WHERE brand_name LIKE '%du%') ORDER BY LEN(device_name) ASC;", "results": [{"internal_id": 12272, "id": "68d6c41b6b4db44c34abc715", "amount": 2099, "availability": "Out of Stock", "brand": "Apple", "brand_name": "du", "description": "Your new superpower", "device_name": "iPhone 13", "device_type": "Smartphones", "is_preorder": false, "installment_amount_for_12_months": 172, "installment_amount_for_24_months": 86, "processed_at": "2025-09-26T20:49:31.591000", "run_id": 245, "segment": "consumer", "storage": "128GB", "url": "https://shop.du.ae/en/personal/Mobile-phones/iphone-13-p-COM-HS-APP-608", "color": "Midnight", "item_id": "COM-HS-APP-608", "additional_specifications": "has_5g : TRUE", "images": "['https://shop.du.ae/medias/sys_master/images/images/h0c/h4a/9117810786334/iPhone-13-Midnight.jpg']", "features": "6.1-inch Super Retina XDR display\nCinematic mode adds shallow depth of field and shifts focus automatically in your videos\nAdvanced dual-camera system with 12MP Wide and Ultra Wide cameras; Photographic Styles, Smart HDR 4, Night mode, 4K Dolby Vision HDR recording\n12MP TrueDepth front camera with Night mode, 4K Dolby Vision HDR recording\nA15 Bionic chip for lightning-fast performance\nUp to 19 hours of video playback\nDurable design with Ceramic Shield\nIndustry-leading IP68 water resistance\n5G for superfast downloads and high-quality streaming\niOS 15 packs new features to do more with iPhone than ever before\nSupports MagSafe accessories for easy attach and faster wireless charging\nUSB \u2013C to Lightning Cable included; Charger sold separately\nDevice is not shrink-wrapped"}, {"internal_id": 12273, "id": "68d6c41b6b4db44c34abc717", "amount": 2099, "availability": "Out of Stock", "brand": "Apple", "brand_name": "du", "description": "Your new superpower", "device_name": "iPhone 13", "device_type": "Smartphones", "is_preorder": false, "installment_amount_for_12_months": 172, "installment_amount_for_24_months": 86, "processed_at": "2025-09-26T20:49:31.600000", "run_id": 245, "segment": "consumer", "storage": "128GB", "url": "https://shop.du.ae/en/personal/Mobile-phones/iphone-13-p-COM-HS-APP-610", "color": "Pink", "item_id": "COM-HS-APP-610", "additional_specifications": "has_5g : TRUE", "images": "['https://shop.du.ae/medias/sys_master/images/images/hc0/h29/8988379152414/iPhone-13-Pink.jpg']", "features": "6.1-inch Super Retina XDR display\nCinematic mode adds shallow depth of field and shifts focus automatically in your videos\nAdvanced dual-camera system with 12MP Wide and Ultra Wide cameras; Photographic Styles, Smart HDR 4, Night mode, 4K Dolby Vision HDR recording\n12MP TrueDepth front camera with Night mode, 4K Dolby Vision HDR recording\nA15 Bionic chip for lightning-fast performance\nUp to 19 hours of video playback\nDurable design with Ceramic Shield\nIndustry-leading IP68 water resistance\n5G for superfast downloads and high-quality streaming\niOS 15 packs new features to do more with iPhone than ever before\nSupports MagSafe accessories for easy attach and faster wireless charging\nUSB \u2013C to Lightning Cable included; Charger sold separately\nDevice is not shrink-wrapped"}, {"internal_id": 12274, "id": "68d6c41b6b4db44c34abc719", "amount": 3599, "availability": "Out of Stock", "brand": "Apple", "brand_name": "du", "description": "Your new superpower", "device_name": "iPhone 13", "device_type": "Smartphones", "is_preorder": false, "installment_amount_for_12_months": 318, "installment_amount_for_24_months": 159, "processed_at": "2025-09-26T20:49:31.609000", "run_id": 245, "segment": "consumer", "storage": "256GB", "url": "https://shop.du.ae/en/personal/Mobile-phones/iphone-13-p-COM-HS-APP-614", "color": "Starlight", "item_id": "COM-HS-APP-614", "additional_specifications": "has_5g : TRUE", "images": "['https://shop.du.ae/medias/sys_master/images/images/hfb/h13/8988379119646/iPhone-13-Starlight.jpg']", "features": "6.1-inch Super Retina XDR display\nCinematic mode adds shallow depth of field and shifts focus automatically in your videos\nAdvanced dual-camera system with 12MP Wide and Ultra Wide cameras; Photographic Styles, Smart HDR 4, Night mode, 4K Dolby Vision HDR recording\n12MP TrueDepth front camera with Night mode, 4K Dolby Vision HDR recording\nA15 Bionic chip for lightning-fast performance\nUp to 19 hours of video playback\nDurable design with Ceramic Shield\nIndustry-leading IP68 water resistance\n5G for superfast downloads and high-quality streaming\niOS 15 packs new features to do more with iPhone than ever before\nSupports MagSafe accessories for easy attach and faster wireless charging\nUSB \u2013C to Lightning Cable included; Charger sold separately\nDevice is not shrink-wrapped"}, {"internal_id": 12275, "id": "68d6c41b6b4db44c34abc71b", "amount": 3830, "availability": "Out of Stock", "brand": "Apple", "brand_name": "du", "description": "Your new superpower", "device_name": "iPhone 13", "device_type": "Smartphones", "is_preorder": false, "installment_amount_for_12_months": 212, "installment_amount_for_24_months": 106, "processed_at": "2025-09-26T20:49:31.618000", "run_id": 245, "segment": "consumer", "storage": "256GB", "url": "https://shop.du.ae/en/personal/Mobile-phones/iphone-13-p-COM-HS-APP-616", "color": "(PRODUCT)RED", "item_id": "COM-HS-APP-616", "additional_specifications": "has_5g : TRUE", "images": "['https://shop.du.ae/medias/sys_master/images/images/h16/h2a/8988383051806/iPhone-13-Red.jpg']", "features": "6.1-inch Super Retina XDR display\nCinematic mode adds shallow depth of field and shifts focus automatically in your videos\nAdvanced dual-camera system with 12MP Wide and Ultra Wide cameras; Photographic Styles, Smart HDR 4, Night mode, 4K Dolby Vision HDR recording\n12MP TrueDepth front camera with Night mode, 4K Dolby Vision HDR recording\nA15 Bionic chip for lightning-fast performance\nUp to 19 hours of video playback\nDurable design with Ceramic Shield\nIndustry-leading IP68 water resistance\n5G for superfast downloads and high-quality streaming\niOS 15 packs new features to do more with iPhone than ever before\nSupports MagSafe accessories for easy attach and faster wireless charging\nUSB \u2013C to Lightning Cable included; Charger sold separately\nDevice is not shrink-wrapped"}, {"internal_id": 12276, "id": "68d6c41b6b4db44c34abc71d", "amount": 2564, "availability": "Out of Stock", "brand": "Apple", "brand_name": "du", "description": "Your new superpower", "device_name": "iPhone 13", "device_type": "Smartphones", "is_preorder": false, "installment_amount_for_12_months": 414, "installment_amount_for_24_months": 207, "processed_at": "2025-09-26T20:49:31.627000", "run_id": 245, "segment": "consumer", "storage": "256GB", "url": "https://shop.du.ae/en/personal/Mobile-phones/iphone-13-p-COM-HS-APP-617", "color": "Blue", "item_id": "COM-HS-APP-617", "additional_specifications": "has_5g : TRUE", "images": "['https://shop.du.ae/medias/sys_master/images/images/h52/hce/8988380430366/iPhone-13-Blue.jpg']", "promotion": "Special Offer", "features": "6.1-inch Super Retina XDR display\nCinematic mode adds shallow depth of field and shifts focus automatically in your videos\nAdvanced dual-camera system with 12MP Wide and Ultra Wide cameras; Photographic Styles, Smart HDR 4, Night mode, 4K Dolby Vision HDR recording\n12MP TrueDepth front camera with Night mode, 4K Dolby Vision HDR recording\nA15 Bionic chip for lightning-fast performance\nUp to 19 hours of video playback\nDurable design with Ceramic Shield\nIndustry-leading IP68 water resistance\n5G for superfast downloads and high-quality streaming\niOS 15 packs new features to do more with iPhone than ever before\nSupports MagSafe accessories for easy attach and faster wireless charging\nUSB \u2013C to Lightning Cable included; C
+Chat.tsx:582 Received chunk: harger sold separately\nDevice is not shrink-wrapped"}]}][END_SQL_RESULTS]
+Chat.tsx:577 Stream finished
+Chat.tsx:835 Chat interaction completed - messages should be persisted by backend
