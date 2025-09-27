@@ -852,12 +852,20 @@ while (true) {
 
 setMessages(prev => {
 
-  const lastAssistantIdx = prev.findIndex(
+  // Find the LAST assistant message (not based on interactionId, but really the last one)
 
-    m => m.id === currentInteractionIdRef.current && m.sender === "assistant"
+  const lastAssistantIdx = (() => {
 
-  );
+    for (let i = prev.length - 1; i >= 0; i--) {
 
+      if (prev[i].sender === "assistant") return i;
+
+    }
+
+    return -1;
+
+  })();
+ 
   if (lastAssistantIdx === -1) return prev;
  
   let sqlResults: NormalizedResult[] = [];
@@ -876,7 +884,7 @@ setMessages(prev => {
 
       sqlResults = normalizeResults(sqlJson, "sql");
 
-    } catch (err) {}
+    } catch {}
 
   }
  
@@ -892,7 +900,7 @@ setMessages(prev => {
 
       webResults = normalizeResults(webJson, "web");
 
-    } catch (err) {}
+    } catch {}
 
   }
  
@@ -916,6 +924,7 @@ setMessages(prev => {
 
 });
 
+ 
  
       // --- PATCH: Attach extracted results to the last assistant message ---
 
