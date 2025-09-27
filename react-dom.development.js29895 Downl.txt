@@ -598,187 +598,256 @@ const Chat: React.FC = () => {
       console.log("Stream received:", stream);
 
       const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      let currentEvent: StreamEvent | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
+const decoder = new TextDecoder();
+ 
+while (true) {
 
-        if (done) {
-          // When finished, mark assistant as no longer streaming (but DON'T touch content/results)
+  const { done, value } = await reader.read();
 
-          setMessages((prev) =>
-            prev.map((m) =>
+  if (done) {
+
+    // Finalize: mark as not streaming, but don't clear results/content
+
+    setMessages(prev =>
+
+      prev.map(m =>
+
+        m.id === currentInteractionIdRef.current
+
+          ? { ...m, isStreaming: false }
+
+          : m
+
+      )
+
+    );
+
+    break;
+
+  }
+ 
+  const chunk = decoder.decode(value, { stream: true });
+
+  if (!chunk.trim()) continue;
+ 
+  // Try to parse events (SSE)
+
+  const events = streamParserRef.current.parse(chunk);
+ 
+  if (events.length > 0) {
+
+    for (const event of events) {
+
+      switch (event.type) {
+
+        case "milestone":
+
+          setCurrentMilestone({
+
+            stage: event.stage,
+
+            tip: event.tip,
+
+            message: event.message,
+
+          });
+
+          break;
+ 
+        case "token":
+
+          // Add tokens to content in React state only
+
+          setMessages(prev =>
+
+            prev.map(m =>
+
               m.id === currentInteractionIdRef.current
-                ? { ...m, isStreaming: false }
+
+                ? {
+
+                    ...m,
+
+                    content: (m.content || "") + event.content,
+
+                    isStreaming: true,
+
+                  }
+
                 : m
+
             )
+
           );
 
           break;
-        }
+ 
+        case "results": {
 
-        const chunk = decoder.decode(value, { stream: true });
+          const normalizedSql = normalizeResults(event.payload.sql || [], "sql");
 
-        if (!chunk.trim()) continue;
+          const normalizedWeb = normalizeResults(event.payload.web || [], "web");
 
-        // Try to parse events (SSE)
+          const normalizedEmbedding = normalizeResults(event.payload.embedding || [], "embedding");
 
-        const events = streamParserRef.current.parse(chunk);
+          setMessages(prev =>
 
-        if (events.length > 0) {
-          for (const event of events) {
-            switch (event.type) {
-              case "milestone":
-                setCurrentMilestone({
-                  stage: event.stage,
+            prev.map(m =>
 
-                  tip: event.tip,
-
-                  message: event.message,
-                });
-
-                break;
-
-              case "token":
-                // Append the new token to the existing content in state
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-                          content: (m.content || "") + event.content,
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-
-                break;
-
-              case "results": {
-                // Normalize results and merge into assistant message
-
-                const normalizedSql = normalizeResults(
-                  event.payload.sql || [],
-                  "sql"
-                );
-
-                const normalizedWeb = normalizeResults(
-                  event.payload.web || [],
-                  "web"
-                );
-
-                const normalizedEmbedding = normalizeResults(
-                  event.payload.embedding || [],
-                  "embedding"
-                );
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-
-                          sqlResults: normalizedSql,
-
-                          webResults: normalizedWeb,
-
-                          embeddingResults: normalizedEmbedding,
-
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-
-                // Show results panel (auto-selecting tab)
-
-                setResultsPanelData({
-                  sql: normalizedSql,
-
-                  web: normalizedWeb,
-
-                  embedding: normalizedEmbedding,
-                });
-
-                setResultsPanelType(
-                  normalizedWeb.length > 0
-                    ? "web"
-                    : normalizedSql.length > 0
-                    ? "sql"
-                    : normalizedEmbedding.length > 0
-                    ? "embedding"
-                    : ""
-                );
-
-                setShowResultsPanel(true);
-
-                break;
-              }
-
-              case "final":
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-
-                          content: event.full_content_markdown ?? m.content,
-
-                          isStreaming: false,
-
-                          // DO NOT touch results! They’re already in state.
-                        }
-                      : m
-                  )
-                );
-
-                break;
-
-              case "meta":
-                if (event.session_title && currentSessionId) {
-                  setSessions((prev) =>
-                    prev.map((session) =>
-                      session.session_id === currentSessionId
-                        ? { ...session, title: event.session_title! }
-                        : session
-                    )
-                  );
-                }
-
-                break;
-
-              case "error":
-                toast({
-                  title: "Stream error",
-
-                  description: event.message,
-
-                  variant: "destructive",
-                });
-
-                break;
-            }
-          }
-        } else {
-          // Fallback: treat as raw text token (if not SSE-formatted)
-
-          setMessages((prev) =>
-            prev.map((m) =>
               m.id === currentInteractionIdRef.current
+
                 ? {
+
                     ...m,
-                    content: (m.content || "") + chunk,
+
+                    sqlResults: normalizedSql,
+
+                    webResults: normalizedWeb,
+
+                    embeddingResults: normalizedEmbedding,
+
                     isStreaming: true,
+
                   }
+
                 : m
+
             )
+
           );
+
+          setResultsPanelData({
+
+            sql: normalizedSql,
+
+            web: normalizedWeb,
+
+            embedding: normalizedEmbedding,
+
+          });
+
+          setResultsPanelType(
+
+            normalizedWeb.length > 0
+
+              ? "web"
+
+              : normalizedSql.length > 0
+
+              ? "sql"
+
+              : normalizedEmbedding.length > 0
+
+              ? "embedding"
+
+              : ""
+
+          );
+
+          setShowResultsPanel(true);
+
+          break;
+
         }
+ 
+        case "final":
+
+          setMessages(prev =>
+
+            prev.map(m =>
+
+              m.id === currentInteractionIdRef.current
+
+                ? {
+
+                    ...m,
+
+                    content: event.full_content_markdown ?? m.content,
+
+                    isStreaming: false,
+
+                  }
+
+                : m
+
+            )
+
+          );
+
+          break;
+ 
+        case "meta":
+
+          if (event.session_title && currentSessionId) {
+
+            setSessions(prev =>
+
+              prev.map(session =>
+
+                session.session_id === currentSessionId
+
+                  ? { ...session, title: event.session_title! }
+
+                  : session
+
+              )
+
+            );
+
+          }
+
+          break;
+ 
+        case "error":
+
+          toast({
+
+            title: "Stream error",
+
+            description: event.message,
+
+            variant: "destructive",
+
+          });
+
+          break;
+
       }
+
+    }
+
+  } else {
+
+    // Fallback: treat as raw text token
+
+    setMessages(prev =>
+
+      prev.map(m =>
+
+        m.id === currentInteractionIdRef.current
+
+          ? {
+
+              ...m,
+
+              content: (m.content || "") + chunk,
+
+              isStreaming: true,
+
+            }
+
+          : m
+
+      )
+
+    );
+
+  }
+
+}
+
+ 
 
       // Finalize the assistant message
       setMessages((prev) =>
