@@ -924,85 +924,55 @@ setMessages(prev => {
 
 });
 
+
  
  
       // --- PATCH: Attach extracted results to the last assistant message ---
 
+// === PATCH: At the end of streaming, attach extracted results to last assistant message ===
 setMessages(prev => {
-
-  // Find the last assistant message (streamed one)
-
   const lastAssistantIdx = prev.findIndex(
-
     m => m.id === currentInteractionIdRef.current && m.sender === "assistant"
-
   );
-
   if (lastAssistantIdx === -1) return prev;
  
-  let sqlResults: NormalizedResult[] = [];
-
-  let webResults: NormalizedResult[] = [];
+  let sqlResults = [];
+  let webResults = [];
  
-  // Extract from buffer
-
   const sqlMatch = fullAssistantBuffer.match(/\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/);
-
   if (sqlMatch) {
-
     try {
-
       const sqlJson = JSON.parse(sqlMatch[1]);
-
       sqlResults = normalizeResults(sqlJson, "sql");
-
-    } catch (err) {
-
-      // ignore parse errors
-
-    }
-
-  }
-
-  const webMatch = fullAssistantBuffer.match(/\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/);
-
-  if (webMatch) {
-
-    try {
-
-      const webJson = JSON.parse(webMatch[1]);
-
-      webResults = normalizeResults(webJson, "web");
-
-    } catch (err) {
-
-      // ignore parse errors
-
-    }
-
+    } catch (err) {}
   }
  
-  // Patch the assistant message
-
+  const webMatch = fullAssistantBuffer.match(/\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/);
+  if (webMatch) {
+    try {
+      const webJson = JSON.parse(webMatch[1]);
+      webResults = normalizeResults(webJson, "web");
+    } catch (err) {}
+  }
+ 
+  // (1) Patch the message with results
   return prev.map((m, idx) =>
-
     idx === lastAssistantIdx
-
-      ? {
-
-          ...m,
-
-          sqlResults,
-
-          webResults,
-
-        }
-
+      ? { ...m, sqlResults, webResults }
       : m
-
   );
-
 });
+
+// (2) Panel logic – put **OUTSIDE** the setMessages callback:
+if (sqlResults.length > 0 || webResults.length > 0) {
+  setResultsPanelData({
+    sql: sqlResults,
+    web: webResults,
+    embedding: [],
+  });
+  setResultsPanelType(webResults.length > 0 ? "web" : "sql");
+  setShowResultsPanel(true);
+}
 
   
  
