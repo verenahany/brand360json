@@ -1,1408 +1,448 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/auth/AuthContext";
-import { apiClient } from "@/api/gen/client";
-import {
-  ChatMessage,
-  MilestoneState,
-  SSEStreamParser,
-  getContextAwareTip,
-} from "@/types/chat";
-import { StreamEvent } from "@/api/gen/types";
-import { ChatSession } from "@/api/gen/types";
-import { NormalizedResult } from "@/components/results/types";
-import ChatThread from "./ChatThread";
-import MessageComposer from "./MessageComposer";
-import EnhancedResultsPanel from "@/components/results/EnhancedResultsPanel";
-import TableEnhancer from "@/components/tables/TableEnhancer";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Plus,
-  MessageCircle,
-  Star,
-  Archive,
-  Trash2,
-  Settings,
-  LogOut,
-  MoreVertical,
-  Edit2,
-  Search,
-  AlertTriangle,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import brandLogo from "@/assets/brand360.svg";
 
-// Normalize results to consistent format for both live and historical messages
-
-const normalizeResults = (
-  results: any[],
-  type: "sql" | "web" | "embedding"
-): NormalizedResult[] => {
-  if (!Array.isArray(results)) return [];
-
-  return results.flatMap((item: any, index: number) => {
-    if (!item) return [];
-
-    if (type === "web") {
-      // ---- PATCHED: Handle multiple legacy shapes ----
-
-      // 1. New: Array of results
-
-      if (Array.isArray(item.results)) {
-        return item.results.map((result: any, idx: number) => ({
-          id: `web-${index}-${idx}`,
-
-          result_source: "web",
-
-          result_score: result.result_score || 0,
-
-          title: result.title || "Untitled",
-
-          url: result.url || "",
-
-          record: {
-            snippet: result.content || result.snippet || "",
-
-            content: result.content || result.snippet || "",
-
-            source: result.url
-              ? result.url.startsWith("http")
-                ? new URL(result.url).hostname
-                : result.url
-              : "unknown",
-
-            ...result,
-          },
-
-          timestamp: result.timestamp || new Date().toISOString(),
-        }));
-      }
-
-      // 2. PATCH: Single object
-      else if (item.results && typeof item.results === "object") {
-        return [
-          {
-            id: `web-${index}-0`,
-
-            result_source: "web",
-
-            result_score: item.results.result_score || 0,
-
-            title: item.results.title || "Untitled",
-
-            url: item.results.url || "",
-
-            record: {
-              snippet: item.results.content || item.results.snippet || "",
-
-              content: item.results.content || item.results.snippet || "",
-
-              source: item.results.url
-                ? item.results.url.startsWith("http")
-                  ? new URL(item.results.url).hostname
-                  : item.results.url
-                : "unknown",
-
-              ...item.results,
-            },
-
-            timestamp: item.results.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      // 3. Flat: direct web result object
-      else if (item.url || item.title) {
-        return [
-          {
-            id: `web-${index}`,
-
-            result_source: "web",
-
-            result_score: item.result_score || 0,
-
-            title: item.title || "Untitled",
-
-            url: item.url || "",
-
-            record: {
-              snippet: item.content || item.snippet || "",
-
-              content: item.content || item.snippet || "",
-
-              source: item.url
-                ? item.url.startsWith("http")
-                  ? new URL(item.url).hostname
-                  : item.url
-                : "unknown",
-
-              ...item,
-            },
-
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      return [];
-    } else {
-      // ---- SQL / Embedding logic ----
-
-      if (Array.isArray(item.results)) {
-        return item.results.map((record: any, idx: number) => ({
-          id: `${type}-${index}-${idx}`,
-
-          result_source: record.result_source || type,
-
-          result_score: record.result_score || 0,
-
-          table: item.table || record.table || "Database Results",
-
-          query: item.query || record.query || "",
-
-          title:
-            record.name ||
-            record.device_name ||
-            record.plan_name ||
-            record.title ||
-            item.table ||
-            "Record",
-
-          record,
-
-          timestamp: record.timestamp || new Date().toISOString(),
-        }));
-      } else if (
-        item.table ||
-        item.query ||
-        item.name ||
-        item.device_name ||
-        item.plan_name ||
-        Object.keys(item).length > 2
-      ) {
-        return [
-          {
-            id: `${type}-${index}`,
-
-            result_source: item.result_source || type,
-
-            result_score: item.result_score || 0,
-
-            table: item.table || "Database Results",
-
-            query: item.query || "",
-
-            title:
-              item.name ||
-              item.device_name ||
-              item.plan_name ||
-              item.title ||
-              item.table ||
-              "Record",
-
-            record: item,
-
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      return [];
-    }
-  });
-};
-
-const Chat: React.FC = () => {
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [currentMilestone, setCurrentMilestone] = useState<
-    MilestoneState | undefined
-  >();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-
-  // Session management
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [showSessionsPanel, setShowSessionsPanel] = useState(true);
-  const [isRenamingSession, setIsRenamingSession] = useState<{
-    active: boolean;
-    id: string | null;
-    title: string;
-  }>({
-    active: false,
-    id: null,
-    title: "",
-  });
-  const [favoriteSessionIds, setFavoriteSessionIds] = useState<string[]>([]);
-  const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>([]);
-  const [activeFolder, setActiveFolder] = useState<
-    "all" | "favorites" | "archived"
-  >("all");
-
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // Results panel
-  const [showResultsPanel, setShowResultsPanel] = useState(false);
-  const [resultsPanelData, setResultsPanelData] = useState<any>(null);
-  const [resultsPanelType, setResultsPanelType] = useState<string>("");
-
-  // Session warning
-  const [sessionWarning, setSessionWarning] = useState({
-    show: false,
-    countdown: 0,
-  });
-
-  // Handle viewing full results
-  const handleViewFullResults = (type: "web" | "sql" | "embedding") => {
-    setResultsPanelType(type);
-    setShowResultsPanel(true);
-  };
-
-  // Refs and utilities
-  const streamParserRef = useRef(new SSEStreamParser());
-  const currentInteractionIdRef = useRef<string | null>(null);
-  const { currentUser, logout } = useAuth();
-  const { toast } = useToast();
-
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions();
-    loadFavoritesAndArchived();
-  }, []);
-
-  // Load favorites and archived from localStorage
-  const loadFavoritesAndArchived = () => {
-    try {
-      const storedFavorites = localStorage.getItem("favoriteSessionIds");
-      if (storedFavorites) {
-        setFavoriteSessionIds(JSON.parse(storedFavorites));
-      }
-
-      const storedArchived = localStorage.getItem("archivedSessionIds");
-      if (storedArchived) {
-        setArchivedSessionIds(JSON.parse(storedArchived));
-      }
-    } catch (error) {
-      console.error("Failed to load favorites/archived:", error);
-    }
-  };
-
-  // Load sessions from API
-  const loadSessions = async () => {
-    try {
-      console.log("Loading sessions...");
-      const sessionsData = await apiClient.getSessions();
-      console.log("Sessions loaded:", sessionsData);
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error("Failed to load sessions:", error);
-      toast({
-        title: "Failed to load sessions",
-        description: "Could not load your conversation history",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Create new session
-  const createNewSession = async (showToast: boolean = true) => {
-    if (!currentUser) return;
-
-    try {
-      const newSession = await apiClient.createSession({
-        user_id: currentUser.id,
-        title: "New Conversation",
-      });
-
-      setSessionId(newSession.session_id);
-      setMessages([]);
-      await loadSessions();
-
-      if (showToast) {
-        toast({
-          title: "New conversation started",
-          description: "You can start chatting now",
-        });
-      }
-
-      return newSession.session_id;
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      if (showToast) {
-        toast({
-          title: "Failed to create session",
-          description: "Could not start a new conversation",
-          variant: "destructive",
-        });
-      }
-      return null;
-    }
-  };
-
-  // Load session messages
-  const loadSession = async (session: ChatSession) => {
-    try {
-      console.log("Loading session:", session.session_id);
-      console.log(
-        "API URL will be:",
-        `/api/sessions/${session.session_id}/messages`
-      );
-      setSessionId(session.session_id);
-
-      const messagesData = await apiClient.getSessionMessages(
-        session.session_id
-      );
-      console.log("Session messages loaded:", messagesData);
-      console.log("Messages count:", messagesData.length);
-      console.log("Message structure (first):", messagesData[0]); // Log first message structure
-
-      if (messagesData.length === 0) {
-        console.warn("No messages found for session:", session.session_id);
-        console.log("Session details:", session);
-
-        // Try debug endpoint to see what's in the database
-        try {
-          const debugData = await apiClient.debugSessionMessages(
-            session.session_id
-          );
-          console.log("Debug data for session:", debugData);
-        } catch (debugError) {
-          console.error("Debug endpoint failed:", debugError);
-        }
-      }
-
-      const formattedMessages: ChatMessage[] = messagesData.map(
-        (msg, index) => {
-          // Clean content by removing ALL result blocks and formatting tokens
-          let cleanContent = msg.content || "";
-
-          // Comprehensive cleaning - remove all known markers and tokens
-          cleanContent = cleanContent
-            // Bot type and control markers
-            .replace(/\[BOT_TYPE:[^\]]*\]/g, "")
-            .replace(/\[DONE\]/g, "")
-            .replace(/\[START\]/g, "")
-            .replace(/\[END\]/g, "")
-            .replace(/\[MILESTONE:[^\]]*\]/g, "")
-            // Result blocks with various ending formats
-            .replace(/\[SQL_RESULTS\][\s\S]*?\[\/END_SQL_RESULTS\]/g, "")
-            .replace(/\[WEB_RESULTS\][\s\S]*?\[\/END_WEB_RESULTS\]/g, "")
-            .replace(
-              /\[EMBEDDING_RESULTS\][\s\S]*?\[\/END_EMBEDDING_RESULTS\]/g,
-              ""
-            )
-            .replace(/\[SQL_RESULTS\][\s\S]*?\[END_SQL_RESULTS\]/g, "")
-            .replace(/\[WEB_RESULTS\][\s\S]*?\[END_WEB_RESULTS\]/g, "")
-            .replace(
-              /\[EMBEDDING_RESULTS\][\s\S]*?\[END_EMBEDDING_RESULTS\]/g,
-              ""
-            )
-            // Any remaining square bracket control markers
-            .replace(/\[[A-Z_]+:[^\]]*\]/g, "")
-            .replace(/\[[A-Z_]+\]/g, "")
-            .replace(/^```(?:\w+)?\n([\s\S]*?)\n```$/g, "$1")
-            // Clean up extra whitespace and newlines
-            .replace(/\n\s*\n\s*\n/g, "\n\n") // Reduce multiple newlines to double
-
-            .trim();
-
-          // --- Normalization Fix ---
-          let sender: "user" | "assistant" | "system";
-          if (msg.sender === "bot") {
-            sender = "assistant";
-          } else if (msg.sender === "user") {
-            sender = "user";
-          } else if (msg.sender === "system") {
-            sender = "system";
-          } else {
-            sender = "assistant"; // fallback, just in case
-          }
-
-          // Normalize results exactly like live messages to ensure consistent structure
-          const normalizedSqlResults = normalizeResults(
-            msg.sql_results || [],
-            "sql"
-          );
-          const normalizedWebResults = normalizeResults(
-            msg.web_results || [],
-            "web"
-          );
-
-          console.log(`Message ${index} normalized results:`, {
-            sql: normalizedSqlResults.length,
-            web: normalizedWebResults.length,
-            originalSql: msg.sql_results?.length || 0,
-            originalWeb: msg.web_results?.length || 0,
-            sqlSample: normalizedSqlResults[0],
-            webSample: normalizedWebResults[0],
-            originalSqlSample: msg.sql_results?.[0],
-            originalWebSample: msg.web_results?.[0],
-          });
-
-          return {
-            id: msg.message_id || `msg-${index}`,
-            sender, // <--- FIXED!
-            content: cleanContent,
-            timestamp: new Date(msg.timestamp || Date.now()),
-            sqlResults: normalizedSqlResults,
-            webResults: normalizedWebResults,
-            embeddingResults: [],
-            isStreaming: false,
-          };
-        }
-      );
-
-      // Set results panel data if there are any results in the loaded messages
-      // Collect all results from all messages to populate the results panel
-      const allSqlResults = messagesData.flatMap((msg) =>
-        normalizeResults(msg.sql_results || [], "sql")
-      );
-      const allWebResults = messagesData.flatMap((msg) =>
-        normalizeResults(msg.web_results || [], "web")
-      );
-
-      const allResults = {
-        sql: allSqlResults,
-        web: allWebResults,
-        embedding: [], // Backend doesn't store embedding results separately yet
-      };
-
-      // Auto-open results panel if we have any results (like live messages do)
-      if (allResults.sql.length > 0 || allResults.web.length > 0) {
-        setResultsPanelData(allResults);
-        // Prioritize web results if available, otherwise SQL
-        setResultsPanelType(allResults.web.length > 0 ? "web" : "sql");
-        setShowResultsPanel(true);
-      } else {
-        // Close results panel if no results
-        setShowResultsPanel(false);
-        setResultsPanelData(null);
-      }
-
-      setMessages(formattedMessages);
-
-      toast({
-        title: "Session loaded",
-        description: `Loaded ${formattedMessages.length} messages`,
-      });
-    } catch (error) {
-      console.error("Failed to load session:", error);
-      toast({
-        title: "Failed to load session",
-        description: "Could not load the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Send message and handle streaming response
-  const sendMessage = async (messageText: string, webSearch: boolean) => {
-    console.log("=== SEND MESSAGE CALLED ===", messageText);
-    if (!messageText.trim() || isProcessing) return;
-
-    let currentSessionId = sessionId;
-
-    // If no session, create one first
-    if (!currentSessionId) {
-      currentSessionId = await createNewSession(false);
-      if (!currentSessionId) return; // Failed to create session
-    }
-
-    // Check if this is the first message and update session title
-    const isFirstMessage = messages.length === 0;
-    if (isFirstMessage && currentSessionId) {
-      try {
-        // Update session title with first message (truncated)
-        const titleFromMessage =
-          messageText.length > 50
-            ? messageText.substring(0, 50) + "..."
-            : messageText;
-
-        await apiClient.updateSession(currentSessionId, titleFromMessage);
-        await loadSessions();
-      } catch (error) {
-        console.error("Failed to update session title:", error);
-      }
-    }
-
-    setIsProcessing(true);
-    setCurrentMilestone({
-      stage: "START",
-      tip: getContextAwareTip(messageText).content,
-    });
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: "user",
-      content: messageText,
-      timestamp: new Date(),
-    };
-
-    // Add placeholder assistant message
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      sender: "assistant",
-      content: "",
-      timestamp: new Date(),
-      isStreaming: true,
-    };
-
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
-    currentInteractionIdRef.current = assistantMessageId;
-
-    try {
-      console.log("Sending chat request:", {
-        query: messageText,
-        session_id: currentSessionId,
-        web_search_enabled: webSearch,
-      });
-      console.log("Expected API endpoint:", "/api/chat");
-
-      // Update sessionId state with current session
-      setSessionId(currentSessionId);
-
-      // Start streaming - only send query per OpenAPI spec
-      const stream = await apiClient.chat({
-        query: messageText,
-
-        session_id: currentSessionId!, // <— pass it explicitly
-
-        web_search_enabled: webSearch, // <— pass it explicitly
-      });
-
-      console.log("Stream received:", stream);
-
-      const reader = stream.getReader();
-
-const decoder = new TextDecoder();
- 
-while (true) {
-
-  const { done, value } = await reader.read();
-
-  if (done) {
-
-    // Finalize: mark as not streaming, but don't clear results/content
-
-    setMessages(prev =>
-
-      prev.map(m =>
-
-        m.id === currentInteractionIdRef.current
-
-          ? { ...m, isStreaming: false }
-
-          : m
-
-      )
-
-    );
-
-    break;
-
-  }
- 
-  const chunk = decoder.decode(value, { stream: true });
-
-  if (!chunk.trim()) continue;
- 
-  // Try to parse events (SSE)
-
-  const events = streamParserRef.current.parse(chunk);
- 
-  if (events.length > 0) {
-
-    for (const event of events) {
-
-      switch (event.type) {
-
-        case "milestone":
-
-          setCurrentMilestone({
-
-            stage: event.stage,
-
-            tip: event.tip,
-
-            message: event.message,
-
-          });
-
-          break;
- 
-        case "token":
-
-          // Add tokens to content in React state only
-
-          setMessages(prev =>
-
-            prev.map(m =>
-
-              m.id === currentInteractionIdRef.current
-
-                ? {
-
-                    ...m,
-
-                    content: (m.content || "") + event.content,
-
-                    isStreaming: true,
-
-                  }
-
-                : m
-
-            )
-
-          );
-
-          break;
- 
-        case "results": {
-
-          const normalizedSql = normalizeResults(event.payload.sql || [], "sql");
-
-          const normalizedWeb = normalizeResults(event.payload.web || [], "web");
-
-          const normalizedEmbedding = normalizeResults(event.payload.embedding || [], "embedding");
-
-          setMessages(prev =>
-
-            prev.map(m =>
-
-              m.id === currentInteractionIdRef.current
-
-                ? {
-
-                    ...m,
-
-                    sqlResults: normalizedSql,
-
-                    webResults: normalizedWeb,
-
-                    embeddingResults: normalizedEmbedding,
-
-                    isStreaming: true,
-
-                  }
-
-                : m
-
-            )
-
-          );
-
-          setResultsPanelData({
-
-            sql: normalizedSql,
-
-            web: normalizedWeb,
-
-            embedding: normalizedEmbedding,
-
-          });
-
-          setResultsPanelType(
-
-            normalizedWeb.length > 0
-
-              ? "web"
-
-              : normalizedSql.length > 0
-
-              ? "sql"
-
-              : normalizedEmbedding.length > 0
-
-              ? "embedding"
-
-              : ""
-
-          );
-
-          setShowResultsPanel(true);
-
-          break;
-
-        }
- 
-        case "final":
-
-          setMessages(prev =>
-
-            prev.map(m =>
-
-              m.id === currentInteractionIdRef.current
-
-                ? {
-
-                    ...m,
-
-                    content: event.full_content_markdown ?? m.content,
-
-                    isStreaming: false,
-
-                  }
-
-                : m
-
-            )
-
-          );
-
-          break;
- 
-        case "meta":
-
-          if (event.session_title && currentSessionId) {
-
-            setSessions(prev =>
-
-              prev.map(session =>
-
-                session.session_id === currentSessionId
-
-                  ? { ...session, title: event.session_title! }
-
-                  : session
-
-              )
-
-            );
-
-          }
-
-          break;
- 
-        case "error":
-
-          toast({
-
-            title: "Stream error",
-
-            description: event.message,
-
-            variant: "destructive",
-
-          });
-
-          break;
-
-      }
-
-    }
-
-  } else {
-
-    // Fallback: treat as raw text token
-
-    setMessages(prev =>
-
-      prev.map(m =>
-
-        m.id === currentInteractionIdRef.current
-
-          ? {
-
-              ...m,
-
-              content: (m.content || "") + chunk,
-
-              isStreaming: true,
-
-            }
-
-          : m
-
-      )
-
-    );
-
-  }
-
-}
-
- 
-
-      // Finalize the assistant message
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === currentInteractionIdRef.current
-            ? { ...msg, isStreaming: false }
-            : msg
-        )
-      );
-
-      console.log(
-        "Chat interaction completed - messages should be persisted by backend"
-      );
-    } catch (error) {
-      console.error("Chat error:", error);
-
-      // Update assistant message with error
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === currentInteractionIdRef.current
-            ? {
-                ...msg,
-                content:
-                  "Sorry, I encountered an error processing your request. Please try again.",
-                isStreaming: false,
-              }
-            : msg
-        )
-      );
-
-      toast({
-        title: "Message failed",
-        description: "There was an error sending your message",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-      setCurrentMilestone(undefined);
-      currentInteractionIdRef.current = null;
-      streamParserRef.current.reset();
-    }
-  };
-
-  // Handle streaming events
-  const handleStreamEvent = async (
-    event: StreamEvent,
-    messageId: string,
-    currentContent: string
-  ) => {
-    switch (event.type) {
-      case "milestone":
-        setCurrentMilestone({
-          stage: event.stage,
-          tip: event.tip,
-          message: event.message,
-        });
-        break;
-
-      case "token":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: currentContent + event.content }
-              : msg
-          )
-        );
-        break;
-
-      case "results":
-        if (event.payload) {
-          setResultsPanelData(event.payload);
-          setResultsPanelType("sql"); // Default to SQL tab
-          setShowResultsPanel(true);
-        }
-        break;
-
-      case "final":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? {
-                  ...msg,
-                  content: event.full_content_markdown,
-                  isStreaming: false,
-                }
-              : msg
-          )
-        );
-        break;
-
-      case "meta":
-        if (event.session_title && sessionId) {
-          // Update session title
-          setSessions((prev) =>
-            prev.map((session) =>
-              session.session_id === sessionId
-                ? { ...session, title: event.session_title! }
-                : session
-            )
-          );
-        }
-        break;
-
-      case "error":
-        console.error("Stream error:", event.message);
-        toast({
-          title: "Stream error",
-          description: event.message,
-          variant: "destructive",
-        });
-        break;
-    }
-  };
-
-  // Session management functions
-  const startRenameSession = (session: ChatSession) => {
-    setIsRenamingSession({
-      active: true,
-      id: session.session_id,
-      title: session.title,
-    });
-  };
-
-  const confirmRenameSession = async () => {
-    if (!isRenamingSession.id || !isRenamingSession.title.trim()) return;
-
-    try {
-      await apiClient.updateSession(
-        isRenamingSession.id,
-        isRenamingSession.title.trim()
-      );
-      await loadSessions();
-      setIsRenamingSession({ active: false, id: null, title: "" });
-
-      toast({
-        title: "Session renamed",
-        description: "Conversation title has been updated",
-      });
-    } catch (error) {
-      console.error("Failed to rename session:", error);
-      toast({
-        title: "Rename failed",
-        description: "Could not update the conversation title",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const deleteSession = async (sessionToDelete: ChatSession) => {
-    try {
-      await apiClient.deleteSession(sessionToDelete.session_id);
-
-      // If it's the current session, clear it
-      if (sessionId === sessionToDelete.session_id) {
-        setSessionId(null);
-        setMessages([]);
-      }
-
-      await loadSessions();
-
-      toast({
-        title: "Session deleted",
-        description: "Conversation has been removed",
-      });
-    } catch (error) {
-      console.error("Failed to delete session:", error);
-      toast({
-        title: "Delete failed",
-        description: "Could not delete the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast({
-        title: "Logged out",
-        description: "You have been successfully logged out",
-      });
-    } catch (error) {
-      console.error("Logout error:", error);
-      toast({
-        title: "Logout failed",
-        description: "There was an error logging out",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Toggle favorite status for a session
-  const toggleFavoriteSession = (sessionId: string) => {
-    setFavoriteSessionIds((prevIds) => {
-      const newIds = prevIds.includes(sessionId)
-        ? prevIds.filter((id) => id !== sessionId)
-        : [...prevIds, sessionId];
-
-      try {
-        localStorage.setItem("favoriteSessionIds", JSON.stringify(newIds));
-      } catch (error) {
-        console.error("Failed to store favorites:", error);
-      }
-
-      return newIds;
-    });
-  };
-
-  // Toggle archive status for a session
-  const toggleArchiveSession = (sessionId: string) => {
-    setArchivedSessionIds((prevIds) => {
-      const newIds = prevIds.includes(sessionId)
-        ? prevIds.filter((id) => id !== sessionId)
-        : [...prevIds, sessionId];
-
-      try {
-        localStorage.setItem("archivedSessionIds", JSON.stringify(newIds));
-      } catch (error) {
-        console.error("Failed to store archived:", error);
-      }
-
-      return newIds;
-    });
-  };
-
-  // Filter sessions based on active folder
-  const filteredSessions = sessions.filter((session) => {
-    const matchesSearch = session.title
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const isArchived = archivedSessionIds.includes(session.session_id);
-    const isFavorite = favoriteSessionIds.includes(session.session_id);
-
-    if (activeFolder === "all") {
-      return matchesSearch && !isArchived;
-    } else if (activeFolder === "favorites") {
-      return matchesSearch && isFavorite && !isArchived;
-    } else if (activeFolder === "archived") {
-      return matchesSearch && isArchived;
-    }
-
-    return false;
-  });
-
-  return (
-    <SidebarProvider>
-      <div className="min-h-screen flex w-full bg-background">
-        {/* Sidebar */}
-        <Sidebar className="border-r">
-          <SidebarContent>
-            {/* Logo Header */}
-            <div className="p-4 border-b">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 flex items-center justify-center">
-                  <img src={brandLogo} alt="Brand360" className="h-6 w-auto" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">Brand360.ai</p>
-                  <p className="text-xs text-muted-foreground">AI Assistant</p>
-                </div>
-              </div>
-            </div>
-
-            {/* New Conversation */}
-            <div className="p-4 border-b">
-              <Button
-                onClick={() => createNewSession(true)}
-                className="w-full justify-start"
-                variant="outline"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Conversation
-              </Button>
-            </div>
-
-            {/* Search */}
-            <div className="p-4 border-b">
-              <Input
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
-            </div>
-
-            {/* Folders */}
-            <SidebarGroup className="px-2">
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "all"}
-                      onClick={() => setActiveFolder("all")}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      <span>All Conversations</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "favorites"}
-                      onClick={() => setActiveFolder("favorites")}
-                    >
-                      <Star className="w-4 h-4" />
-                      <span>Favorites</span>
-                      {favoriteSessionIds.length > 0 && (
-                        <Badge variant="secondary" className="ml-auto">
-                          {favoriteSessionIds.length}
-                        </Badge>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "archived"}
-                      onClick={() => setActiveFolder("archived")}
-                    >
-                      <Archive className="w-4 h-4" />
-                      <span>Archived</span>
-                      {archivedSessionIds.length > 0 && (
-                        <Badge variant="secondary" className="ml-auto">
-                          {archivedSessionIds.length}
-                        </Badge>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            {/* Sessions List */}
-            <SidebarGroup className="flex-1 overflow-hidden">
-              <SidebarGroupLabel>
-                {activeFolder === "all" && "Recent Conversations"}
-                {activeFolder === "favorites" && "Favorite Conversations"}
-                {activeFolder === "archived" && "Archived Conversations"}
-              </SidebarGroupLabel>
-              <SidebarGroupContent className="overflow-y-auto">
-                <SidebarMenu>
-                  {filteredSessions.map((session) => (
-                    <SidebarMenuItem key={session.session_id}>
-                      <div className="flex items-center w-full">
-                        <SidebarMenuButton
-                          asChild
-                          isActive={sessionId === session.session_id}
-                          className="flex-1"
-                        >
-                          <button
-                            onClick={() => loadSession(session)}
-                            className="flex items-center gap-2 w-full"
-                          >
-                            <MessageCircle className="w-4 h-4" />
-                            <span className="truncate">
-                              {isRenamingSession.active &&
-                              isRenamingSession.id === session.session_id ? (
-                                <Input
-                                  value={isRenamingSession.title}
-                                  onChange={(e) =>
-                                    setIsRenamingSession((prev) => ({
-                                      ...prev,
-                                      title: e.target.value,
-                                    }))
-                                  }
-                                  onBlur={confirmRenameSession}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter")
-                                      confirmRenameSession();
-                                    if (e.key === "Escape")
-                                      setIsRenamingSession({
-                                        active: false,
-                                        id: null,
-                                        title: "",
-                                      });
-                                  }}
-                                  className="h-6 text-xs"
-                                  autoFocus
-                                />
-                              ) : (
-                                session.title
-                              )}
-                            </span>
-                          </button>
-                        </SidebarMenuButton>
-
-                        {/* Session Actions */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="w-6 h-6"
-                            >
-                              <MoreVertical className="w-3 h-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="end"
-                            className="w-48 z-50 bg-popover border shadow-md"
-                          >
-                            <DropdownMenuItem
-                              onClick={() =>
-                                toggleFavoriteSession(session.session_id)
-                              }
-                            >
-                              <Star
-                                className={cn(
-                                  "w-3 h-3 mr-2",
-                                  favoriteSessionIds.includes(
-                                    session.session_id
-                                  ) && "fill-current"
-                                )}
-                              />
-                              {favoriteSessionIds.includes(session.session_id)
-                                ? "Unfavorite"
-                                : "Add to favorites"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => startRenameSession(session)}
-                            >
-                              <Edit2 className="w-3 h-3 mr-2" />
-                              Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                toggleArchiveSession(session.session_id)
-                              }
-                            >
-                              <Archive className="w-3 h-3 mr-2" />
-                              {archivedSessionIds.includes(session.session_id)
-                                ? "Unarchive"
-                                : "Archive"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => deleteSession(session)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Trash2 className="w-3 h-3 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            {/* User Info at Bottom */}
-            <div className="p-4 border-t mt-auto">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
-                  <span className="text-xs font-medium">
-                    {currentUser?.name?.charAt(0).toUpperCase() || "U"}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">
-                    {currentUser?.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {currentUser?.email}
-                  </p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={handleLogout}>
-                  <LogOut className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </SidebarContent>
-        </Sidebar>
-
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <header className="h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center px-4">
-            <SidebarTrigger />
-            <div className="flex-1 flex items-center justify-between ml-4">
-              <div>
-                <h1 className="text-lg font-semibold">Brand360.ai Chat</h1>
-                {sessionId && (
-                  <p className="text-sm text-muted-foreground">
-                    Current session:{" "}
-                    {sessions.find((s) => s.session_id === sessionId)?.title ||
-                      "Unknown"}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Session Warning */}
-                {sessionWarning.show && (
-                  <div className="flex items-center gap-2 px-3 py-1 bg-warning/10 text-warning rounded-md">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span className="text-sm">
-                      Session expires in {sessionWarning.countdown}s
-                    </span>
-                  </div>
-                )}
-
-                {/* Results Panel Toggle */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowResultsPanel(!showResultsPanel)}
-                  className={cn(showResultsPanel && "bg-accent")}
-                >
-                  <Search className="w-4 h-4 mr-2" />
-                  Results
-                  {resultsPanelData && (
-                    <Badge variant="secondary" className="ml-2">
-                      {Array.isArray(resultsPanelData)
-                        ? resultsPanelData.length
-                        : "•"}
-                    </Badge>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </header>
-
-          {/* Chat Content */}
-          <div className="flex-1 flex">
-            <div className="flex-1 flex flex-col">
-              <ChatThread
-                messages={messages}
-                currentMilestone={currentMilestone}
-                onViewFullResults={handleViewFullResults}
-              />
-              <MessageComposer
-                onSendMessage={sendMessage}
-                onInputFocus={() => {
-                  // Start new session when clicking input if no session exists
-                  if (!sessionId && messages.length === 0) {
-                    createNewSession(false);
-                  }
-                }}
-                isLoading={isProcessing}
-                webSearchEnabled={webSearchEnabled}
-                onWebSearchToggle={setWebSearchEnabled}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Results Panel */}
-        <EnhancedResultsPanel
-          isVisible={showResultsPanel}
-          onClose={() => setShowResultsPanel(false)}
-          resultData={resultsPanelData}
-          resultType={resultsPanelType}
-        />
-      </div>
-    </SidebarProvider>
-  );
-};
-
-export default Chat;
+Chat.tsx:579 Sending chat request: {query: 'yes', session_id: '7a589931-2ca0-40ec-9485-f447efa8ace5', web_search_enabled: true}
+Chat.tsx:584 Expected API endpoint: /api/chat
+Chat.tsx:598 Stream received: ReadableStream {locked: false}
+Chat.tsx:637 CHUNK RECEIVED: [BOT_TYPE:sql_generator]
+Chat.tsx:637 CHUNK RECEIVED: Here's a
+Chat.tsx:637 CHUNK RECEIVED:  detailed comparison
+Chat.tsx:637 CHUNK RECEIVED:  of the
+Chat.tsx:637 CHUNK RECEIVED:  iPhone
+Chat.tsx:637 CHUNK RECEIVED:  16
+Chat.tsx:637 CHUNK RECEIVED:  128
+Chat.tsx:637 CHUNK RECEIVED: GB offers
+Chat.tsx:637 CHUNK RECEIVED:  between e
+Chat.tsx:637 CHUNK RECEIVED: & and du,
+Chat.tsx:637 CHUNK RECEIVED:  including
+Chat.tsx:637 CHUNK RECEIVED:  device prices, available mobile plans, and
+Chat.tsx:637 CHUNK RECEIVED:  plan pricing
+Chat.tsx:637 CHUNK RECEIVED: :
+
+###
+Chat.tsx:637 CHUNK RECEIVED:  Device Comparison
+Chat.tsx:637 CHUNK RECEIVED: 
+
+|
+Chat.tsx:637 CHUNK RECEIVED:  Brand |
+Chat.tsx:637 CHUNK RECEIVED:  Storage |
+Chat.tsx:637 CHUNK RECEIVED:  Color      
+Chat.tsx:637 CHUNK RECEIVED:  | Amount
+Chat.tsx:637 CHUNK RECEIVED:  | Availability
+Chat.tsx:637 CHUNK RECEIVED:  | Install
+Chat.tsx:637 CHUNK RECEIVED: ment (
+Chat.tsx:637 CHUNK RECEIVED: 12/
+Chat.tsx:637 CHUNK RECEIVED: 24 months
+Chat.tsx:637 CHUNK RECEIVED: ) |
+Chat.tsx:637 CHUNK RECEIVED:  Promotion         
+Chat.tsx:637 CHUNK RECEIVED:  | URL
+Chat.tsx:637 CHUNK RECEIVED:  |
+|
+Chat.tsx:637 CHUNK RECEIVED: -------|
+Chat.tsx:637 CHUNK RECEIVED: ---------|
+Chat.tsx:637 CHUNK RECEIVED: -------------|
+Chat.tsx:637 CHUNK RECEIVED: --------|
+Chat.tsx:637 CHUNK RECEIVED: --------------|
+Chat.tsx:637 CHUNK RECEIVED: ----------------------------
+Chat.tsx:637 CHUNK RECEIVED: |----------------
+Chat.tsx:637 CHUNK RECEIVED: ---|
+Chat.tsx:637 CHUNK RECEIVED: ---------------------------------------------------------------------------------------
+Chat.tsx:637 CHUNK RECEIVED: |
+| e&
+Chat.tsx:637 CHUNK RECEIVED:     |
+Chat.tsx:637 CHUNK RECEIVED:  128
+Chat.tsx:637 CHUNK RECEIVED: GB  
+Chat.tsx:637 CHUNK RECEIVED:  | Black       |
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 2,
+Chat.tsx:637 CHUNK RECEIVED: 789 |
+Chat.tsx:637 CHUNK RECEIVED:  In Stock
+Chat.tsx:637 CHUNK RECEIVED:      |
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 256 /
+Chat.tsx:637 CHUNK RECEIVED:  AED 123         
+Chat.tsx:637 CHUNK RECEIVED:  | Limited
+Chat.tsx:637 CHUNK RECEIVED:  time offer
+Chat.tsx:637 CHUNK RECEIVED:  17
+Chat.tsx:637 CHUNK RECEIVED: % Off
+Chat.tsx:637 CHUNK RECEIVED:  | [
+Chat.tsx:637 CHUNK RECEIVED: Link](
+Chat.tsx:637 CHUNK RECEIVED: https://
+Chat.tsx:637 CHUNK RECEIVED: www.etisalat
+Chat.tsx:637 CHUNK RECEIVED: .ae/b2
+Chat.tsx:637 CHUNK RECEIVED: c/
+Chat.tsx:637 CHUNK RECEIVED: eshop
+Chat.tsx:637 CHUNK RECEIVED: /device-
+Chat.tsx:637 CHUNK RECEIVED: configuration?
+Chat.tsx:637 CHUNK RECEIVED: productId=prod
+Chat.tsx:637 CHUNK RECEIVED: 254003
+Chat.tsx:637 CHUNK RECEIVED: 4&r
+Chat.tsx:637 CHUNK RECEIVED: =nfr
+Chat.tsx:637 CHUNK RECEIVED: Ji_
+Chat.tsx:637 CHUNK RECEIVED: 8&
+Chat.tsx:637 CHUNK RECEIVED: skuId
+Chat.tsx:637 CHUNK RECEIVED: =bg
+Chat.tsx:637 CHUNK RECEIVED: Sku382
+Chat.tsx:637 CHUNK RECEIVED: 023833
+Chat.tsx:637 CHUNK RECEIVED: 8)
+Chat.tsx:637 CHUNK RECEIVED:  |
+|
+Chat.tsx:637 CHUNK RECEIVED:  du   
+Chat.tsx:637 CHUNK RECEIVED:  | 
+Chat.tsx:637 CHUNK RECEIVED: 128GB
+Chat.tsx:637 CHUNK RECEIVED:    |
+Chat.tsx:637 CHUNK RECEIVED:  Black      
+Chat.tsx:637 CHUNK RECEIVED:  | AED
+Chat.tsx:637 CHUNK RECEIVED:  2
+Chat.tsx:637 CHUNK RECEIVED: ,779
+Chat.tsx:637 CHUNK RECEIVED:  | In
+Chat.tsx:637 CHUNK RECEIVED:  Stock    
+Chat.tsx:637 CHUNK RECEIVED:  | AED
+Chat.tsx:637 CHUNK RECEIVED:  230
+Chat.tsx:637 CHUNK RECEIVED:  / AED
+Chat.tsx:637 CHUNK RECEIVED:  115
+Chat.tsx:637 CHUNK RECEIVED:           |
+Chat.tsx:637 CHUNK RECEIVED:  Special Offer
+Chat.tsx:637 CHUNK RECEIVED:      |
+Chat.tsx:637 CHUNK RECEIVED:  [Link
+Chat.tsx:637 CHUNK RECEIVED: ](https
+Chat.tsx:637 CHUNK RECEIVED: ://shop
+Chat.tsx:637 CHUNK RECEIVED: .du.a
+Chat.tsx:637 CHUNK RECEIVED: e/en
+Chat.tsx:637 CHUNK RECEIVED: /personal
+Chat.tsx:637 CHUNK RECEIVED: /Mobile
+Chat.tsx:637 CHUNK RECEIVED: -phones
+Chat.tsx:637 CHUNK RECEIVED: /iphone
+Chat.tsx:637 CHUNK RECEIVED: -16
+Chat.tsx:637 CHUNK RECEIVED: -p-C
+Chat.tsx:637 CHUNK RECEIVED: OM-H
+Chat.tsx:637 CHUNK RECEIVED: S-
+Chat.tsx:637 CHUNK RECEIVED: APP-
+Chat.tsx:637 CHUNK RECEIVED: 851#
+Chat.tsx:637 CHUNK RECEIVED: r=A
+Chat.tsx:637 CHUNK RECEIVED: qcYS
+Chat.tsx:637 CHUNK RECEIVED: _1
+Chat.tsx:637 CHUNK RECEIVED: ) |
+
+
+Chat.tsx:637 CHUNK RECEIVED: ### Mobile
+Chat.tsx:637 CHUNK RECEIVED:  Plans Comparison
+Chat.tsx:637 CHUNK RECEIVED: 
+
+####
+Chat.tsx:637 CHUNK RECEIVED:  e&
+Chat.tsx:637 CHUNK RECEIVED:  Mobile Plans
+Chat.tsx:637 CHUNK RECEIVED: 
+
+|
+Chat.tsx:637 CHUNK RECEIVED:  Plan Name
+Chat.tsx:637 CHUNK RECEIVED:                   |
+Chat.tsx:637 CHUNK RECEIVED:  Amount |
+Chat.tsx:637 CHUNK RECEIVED:  Type      
+Chat.tsx:637 CHUNK RECEIVED:  | Data
+Chat.tsx:637 CHUNK RECEIVED:             |
+Chat.tsx:637 CHUNK RECEIVED:  Minutes           
+Chat.tsx:637 CHUNK RECEIVED:  | URL
+Chat.tsx:637 CHUNK RECEIVED:  |
+|
+Chat.tsx:637 CHUNK RECEIVED: ----------------------------
+Chat.tsx:637 CHUNK RECEIVED: |--------
+Chat.tsx:637 CHUNK RECEIVED: |------------
+Chat.tsx:637 CHUNK RECEIVED: |----------------
+Chat.tsx:637 CHUNK RECEIVED: -|----------------
+Chat.tsx:637 CHUNK RECEIVED: ----|---------------------------------------------------------------------------------------
+Chat.tsx:637 CHUNK RECEIVED: |
+|
+Chat.tsx:637 CHUNK RECEIVED:  Flexi
+Chat.tsx:637 CHUNK RECEIVED:                       |
+Chat.tsx:637 CHUNK RECEIVED:  AED 80 |
+Chat.tsx:637 CHUNK RECEIVED:  Postpaid   |
+Chat.tsx:637 CHUNK RECEIVED:  1
+Chat.tsx:637 CHUNK RECEIVED: GB            
+Chat.tsx:637 CHUNK RECEIVED:  | 
+Chat.tsx:637 CHUNK RECEIVED: 50 Flex
+Chat.tsx:637 CHUNK RECEIVED: i minutes
+Chat.tsx:637 CHUNK RECEIVED:    |
+Chat.tsx:637 CHUNK RECEIVED:  [Link
+Chat.tsx:637 CHUNK RECEIVED: ](https
+Chat.tsx:637 CHUNK RECEIVED: ://www
+Chat.tsx:637 CHUNK RECEIVED: .etis
+Chat.tsx:637 CHUNK RECEIVED: alat.a
+Chat.tsx:637 CHUNK RECEIVED: e/b
+Chat.tsx:637 CHUNK RECEIVED: 2c
+Chat.tsx:637 CHUNK RECEIVED: /hesh
+Chat.tsx:637 CHUNK RECEIVED: op/pl
+Chat.tsx:637 CHUNK RECEIVED: ans/post
+Chat.tsx:637 CHUNK RECEIVED: paid-pl
+Chat.tsx:637 CHUNK RECEIVED: ans?
+Chat.tsx:637 CHUNK RECEIVED: subCategory
+Chat.tsx:637 CHUNK RECEIVED: =cat
+Chat.tsx:637 CHUNK RECEIVED: 197002
+Chat.tsx:637 CHUNK RECEIVED: 0#
+Chat.tsx:637 CHUNK RECEIVED: r=n
+Chat.tsx:637 CHUNK RECEIVED: fbe
+Chat.tsx:637 CHUNK RECEIVED: D_
+Chat.tsx:637 CHUNK RECEIVED: 1)
+Chat.tsx:637 CHUNK RECEIVED:  |
+|
+Chat.tsx:637 CHUNK RECEIVED:  Emirati
+Chat.tsx:637 CHUNK RECEIVED:  Wasel
+Chat.tsx:637 CHUNK RECEIVED:               |
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 71 |
+Chat.tsx:637 CHUNK RECEIVED:  Prepaid
+Chat.tsx:637 CHUNK RECEIVED:     |
+Chat.tsx:637 CHUNK RECEIVED:  1
+Chat.tsx:637 CHUNK RECEIVED: GB +
+Chat.tsx:637 CHUNK RECEIVED:  1
+Chat.tsx:637 CHUNK RECEIVED: GB Free
+Chat.tsx:637 CHUNK RECEIVED:   |
+Chat.tsx:637 CHUNK RECEIVED:  60
+Chat.tsx:637 CHUNK RECEIVED:  GCC Flex
+Chat.tsx:637 CHUNK RECEIVED: i      
+Chat.tsx:637 CHUNK RECEIVED:  | [
+Chat.tsx:637 CHUNK RECEIVED: Link](
+Chat.tsx:637 CHUNK RECEIVED: https://
+Chat.tsx:637 CHUNK RECEIVED: www.et
+Chat.tsx:637 CHUNK RECEIVED: isalat
+Chat.tsx:637 CHUNK RECEIVED: .ae
+Chat.tsx:637 CHUNK RECEIVED: /b2
+Chat.tsx:637 CHUNK RECEIVED: c/h
+Chat.tsx:637 CHUNK RECEIVED: eshop
+Chat.tsx:637 CHUNK RECEIVED: /plans
+Chat.tsx:637 CHUNK RECEIVED: /prepaid
+Chat.tsx:637 CHUNK RECEIVED: -emirati
+Chat.tsx:637 CHUNK RECEIVED: -configuration
+Chat.tsx:637 CHUNK RECEIVED: ?product
+Chat.tsx:637 CHUNK RECEIVED: Id=
+Chat.tsx:637 CHUNK RECEIVED: emirati
+Chat.tsx:637 CHUNK RECEIVED: -rolex
+Chat.tsx:637 CHUNK RECEIVED: -prod-
+Chat.tsx:637 CHUNK RECEIVED: 1&r
+Chat.tsx:637 CHUNK RECEIVED: =rh
+Chat.tsx:637 CHUNK RECEIVED: gpG
+Chat.tsx:637 CHUNK RECEIVED: _4
+Chat.tsx:637 CHUNK RECEIVED: &sku
+Chat.tsx:637 CHUNK RECEIVED: Id=
+Chat.tsx:637 CHUNK RECEIVED: emirati
+Chat.tsx:637 CHUNK RECEIVED: -rolex
+Chat.tsx:637 CHUNK RECEIVED: -sku
+Chat.tsx:637 CHUNK RECEIVED: -1
+Chat.tsx:637 CHUNK RECEIVED: ) |
+
+Chat.tsx:637 CHUNK RECEIVED: | Freedom
+Chat.tsx:637 CHUNK RECEIVED:  Plan 250 Flex
+Chat.tsx:637 CHUNK RECEIVED: i     | AED
+Chat.tsx:637 CHUNK RECEIVED:  250
+Chat.tsx:637 CHUNK RECEIVED: | Post
+Chat.tsx:637 CHUNK RECEIVED: paid  
+Chat.tsx:637 CHUNK RECEIVED:  | 
+Chat.tsx:637 CHUNK RECEIVED: 15GB
+Chat.tsx:637 CHUNK RECEIVED:             |
+Chat.tsx:637 CHUNK RECEIVED:  500
+Chat.tsx:637 CHUNK RECEIVED:  Flexi
+Chat.tsx:637 CHUNK RECEIVED:  minutes 
+Chat.tsx:637 CHUNK RECEIVED:  | [
+Chat.tsx:637 CHUNK RECEIVED: Link](
+Chat.tsx:637 CHUNK RECEIVED: https://
+Chat.tsx:637 CHUNK RECEIVED: www.et
+Chat.tsx:637 CHUNK RECEIVED: isalat
+Chat.tsx:637 CHUNK RECEIVED: .ae
+Chat.tsx:637 CHUNK RECEIVED: /b2
+Chat.tsx:637 CHUNK RECEIVED: c/h
+Chat.tsx:637 CHUNK RECEIVED: eshop
+Chat.tsx:637 CHUNK RECEIVED: /plans
+Chat.tsx:637 CHUNK RECEIVED: /postpaid
+Chat.tsx:637 CHUNK RECEIVED: -plans
+Chat.tsx:637 CHUNK RECEIVED: ?sub
+Chat.tsx:637 CHUNK RECEIVED: Category=
+Chat.tsx:637 CHUNK RECEIVED: cat197
+Chat.tsx:637 CHUNK RECEIVED: 0020
+Chat.tsx:637 CHUNK RECEIVED: #r
+Chat.tsx:637 CHUNK RECEIVED: =Ln
+Chat.tsx:637 CHUNK RECEIVED: xsQ
+Chat.tsx:637 CHUNK RECEIVED: _17
+Chat.tsx:637 CHUNK RECEIVED: ) |
+
+
+Chat.tsx:637 CHUNK RECEIVED: #### du
+Chat.tsx:637 CHUNK RECEIVED:  Mobile Plans
+Chat.tsx:637 CHUNK RECEIVED: 
+
+|
+Chat.tsx:637 CHUNK RECEIVED:  Plan Name
+Chat.tsx:637 CHUNK RECEIVED:                   |
+Chat.tsx:637 CHUNK RECEIVED:  Amount |
+Chat.tsx:637 CHUNK RECEIVED:  Type      
+Chat.tsx:637 CHUNK RECEIVED:  | Data            | Minutes            | URL                                                                                  
+Chat.tsx:637 CHUNK RECEIVED:  |
+|
+Chat.tsx:637 CHUNK RECEIVED: ----------------------------
+Chat.tsx:637 CHUNK RECEIVED: |--------
+Chat.tsx:637 CHUNK RECEIVED: |------------
+Chat.tsx:637 CHUNK RECEIVED: |----------------
+Chat.tsx:637 CHUNK RECEIVED: -|--------------------|
+Chat.tsx:637 CHUNK RECEIVED: ---------------------------------------------------------------------------------------
+Chat.tsx:637 CHUNK RECEIVED: |
+|
+Chat.tsx:637 CHUNK RECEIVED:  Fazaa
+Chat.tsx:637 CHUNK RECEIVED:  170
+Chat.tsx:637 CHUNK RECEIVED:                   |
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 170|
+Chat.tsx:637 CHUNK RECEIVED:  Postpaid
+Chat.tsx:637 CHUNK RECEIVED:    |
+Chat.tsx:637 CHUNK RECEIVED:  -              
+Chat.tsx:637 CHUNK RECEIVED:  | -
+Chat.tsx:637 CHUNK RECEIVED:                   |
+Chat.tsx:637 CHUNK RECEIVED:  [Link
+Chat.tsx:637 CHUNK RECEIVED: ](https
+Chat.tsx:637 CHUNK RECEIVED: ://www
+Chat.tsx:637 CHUNK RECEIVED: .du.a
+Chat.tsx:637 CHUNK RECEIVED: e/f
+Chat.tsx:637 CHUNK RECEIVED: azaa
+Chat.tsx:637 CHUNK RECEIVED: /plans
+Chat.tsx:637 CHUNK RECEIVED: /national
+Chat.tsx:637 CHUNK RECEIVED: #r
+Chat.tsx:637 CHUNK RECEIVED: =Rc
+Chat.tsx:637 CHUNK RECEIVED: GKF
+Chat.tsx:637 CHUNK RECEIVED: _1
+Chat.tsx:637 CHUNK RECEIVED: ) |
+
+Chat.tsx:637 CHUNK RECEIVED: | Faz
+Chat.tsx:637 CHUNK RECEIVED: aa 
+Chat.tsx:637 CHUNK RECEIVED: 375                 
+Chat.tsx:637 CHUNK RECEIVED:  | AED
+Chat.tsx:637 CHUNK RECEIVED:  375
+Chat.tsx:637 CHUNK RECEIVED: | Post
+Chat.tsx:637 CHUNK RECEIVED: paid  
+Chat.tsx:637 CHUNK RECEIVED:  | 
+Chat.tsx:637 CHUNK RECEIVED: 150GB
+Chat.tsx:637 CHUNK RECEIVED:            |
+Chat.tsx:637 CHUNK RECEIVED:  Unlimited         
+Chat.tsx:637 CHUNK RECEIVED:  | [
+Chat.tsx:637 CHUNK RECEIVED: Link](
+Chat.tsx:637 CHUNK RECEIVED: https://
+Chat.tsx:637 CHUNK RECEIVED: www.du
+Chat.tsx:637 CHUNK RECEIVED: .ae
+Chat.tsx:637 CHUNK RECEIVED: /faz
+Chat.tsx:637 CHUNK RECEIVED: aa/pl
+Chat.tsx:637 CHUNK RECEIVED: ans/n
+Chat.tsx:637 CHUNK RECEIVED: ational#
+Chat.tsx:637 CHUNK RECEIVED: r=z
+Chat.tsx:637 CHUNK RECEIVED: MASQ
+Chat.tsx:637 CHUNK RECEIVED: _2
+Chat.tsx:637 CHUNK RECEIVED: ) |
+
+Chat.tsx:637 CHUNK RECEIVED: | Data
+Chat.tsx:637 CHUNK RECEIVED: -Only
+Chat.tsx:637 CHUNK RECEIVED:  SIM 
+Chat.tsx:637 CHUNK RECEIVED: 10 GB
+Chat.tsx:637 CHUNK RECEIVED:         |
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 149|
+Chat.tsx:637 CHUNK RECEIVED:  Postpaid
+Chat.tsx:637 CHUNK RECEIVED:    |
+Chat.tsx:637 CHUNK RECEIVED:  10
+Chat.tsx:637 CHUNK RECEIVED: GB           
+Chat.tsx:637 CHUNK RECEIVED:  | -
+Chat.tsx:637 CHUNK RECEIVED:                   |
+Chat.tsx:637 CHUNK RECEIVED:  [Link
+Chat.tsx:637 CHUNK RECEIVED: ](https
+Chat.tsx:637 CHUNK RECEIVED: ://shop
+Chat.tsx:637 CHUNK RECEIVED: .du.a
+Chat.tsx:637 CHUNK RECEIVED: e/en
+Chat.tsx:637 CHUNK RECEIVED: /personal
+Chat.tsx:637 CHUNK RECEIVED: /s-du
+Chat.tsx:637 CHUNK RECEIVED: -datas
+Chat.tsx:637 CHUNK RECEIVED: im-pl
+Chat.tsx:637 CHUNK RECEIVED: ans#
+Chat.tsx:637 CHUNK RECEIVED: r=
+Chat.tsx:637 CHUNK RECEIVED: BDy
+Chat.tsx:637 CHUNK RECEIVED: No_
+Chat.tsx:637 CHUNK RECEIVED: 6)
+Chat.tsx:637 CHUNK RECEIVED:  |
+
+### Verdict
+
+
+Chat.tsx:637 CHUNK RECEIVED: **Winner
+Chat.tsx:637 CHUNK RECEIVED: :** **
+Chat.tsx:637 CHUNK RECEIVED: du**
+Chat.tsx:637 CHUNK RECEIVED:  for device
+Chat.tsx:637 CHUNK RECEIVED:  pricing and
+Chat.tsx:637 CHUNK RECEIVED:  installment options
+Chat.tsx:637 CHUNK RECEIVED: .
+
+**
+Chat.tsx:637 CHUNK RECEIVED: Why:
+Chat.tsx:637 CHUNK RECEIVED: **
+-
+Chat.tsx:637 CHUNK RECEIVED:  **Device
+Chat.tsx:637 CHUNK RECEIVED:  Price:**
+Chat.tsx:637 CHUNK RECEIVED:  du offers
+Chat.tsx:637 CHUNK RECEIVED:  the i
+Chat.tsx:637 CHUNK RECEIVED: Phone 
+Chat.tsx:637 CHUNK RECEIVED: 16 
+Chat.tsx:637 CHUNK RECEIVED: 128GB
+Chat.tsx:637 CHUNK RECEIVED:  at a
+Chat.tsx:637 CHUNK RECEIVED:  slightly lower
+Chat.tsx:637 CHUNK RECEIVED:  price of
+Chat.tsx:637 CHUNK RECEIVED:  AED 
+Chat.tsx:637 CHUNK RECEIVED: 2,
+Chat.tsx:637 CHUNK RECEIVED: 779 compared
+Chat.tsx:637 CHUNK RECEIVED:  to e
+Chat.tsx:637 CHUNK RECEIVED: &'
+Chat.tsx:637 CHUNK RECEIVED: s AED
+Chat.tsx:637 CHUNK RECEIVED:  2
+Chat.tsx:637 CHUNK RECEIVED: ,789
+Chat.tsx:637 CHUNK RECEIVED: .
+-
+Chat.tsx:637 CHUNK RECEIVED:  **Install
+Chat.tsx:637 CHUNK RECEIVED: ment Options
+Chat.tsx:637 CHUNK RECEIVED: :** du
+Chat.tsx:637 CHUNK RECEIVED:  provides more
+Chat.tsx:637 CHUNK RECEIVED:  affordable installment
+Chat.tsx:637 CHUNK RECEIVED:  plans (
+Chat.tsx:637 CHUNK RECEIVED: AED 
+Chat.tsx:637 CHUNK RECEIVED: 230/
+Chat.tsx:637 CHUNK RECEIVED: 115)
+Chat.tsx:637 CHUNK RECEIVED:  compared to
+Chat.tsx:637 CHUNK RECEIVED:  e&
+Chat.tsx:637 CHUNK RECEIVED:  (AED
+Chat.tsx:637 CHUNK RECEIVED:  256
+Chat.tsx:637 CHUNK RECEIVED: /123
+Chat.tsx:637 CHUNK RECEIVED: ).
+-
+Chat.tsx:637 CHUNK RECEIVED:  **Plan
+Chat.tsx:637 CHUNK RECEIVED:  Variety:**
+Chat.tsx:637 CHUNK RECEIVED:  While both
+Chat.tsx:637 CHUNK RECEIVED:  offer a
+Chat.tsx:637 CHUNK RECEIVED:  range of
+Chat.tsx:637 CHUNK RECEIVED:  plans,
+Chat.tsx:637 CHUNK RECEIVED:  du's
+Chat.tsx:637 CHUNK RECEIVED:  Fazaa
+Chat.tsx:637 CHUNK RECEIVED:  375
+Chat.tsx:637 CHUNK RECEIVED:  plan provides
+Chat.tsx:637 CHUNK RECEIVED:  substantial data
+Chat.tsx:637 CHUNK RECEIVED:  (150
+Chat.tsx:637 CHUNK RECEIVED: GB)
+Chat.tsx:637 CHUNK RECEIVED:  and unlimited
+Chat.tsx:637 CHUNK RECEIVED:  minutes,
+Chat.tsx:637 CHUNK RECEIVED:  which may
+Chat.tsx:637 CHUNK RECEIVED:  appeal to
+Chat.tsx:637 CHUNK RECEIVED:  heavy users
+Chat.tsx:637 CHUNK RECEIVED: .
+
+Would
+Chat.tsx:637 CHUNK RECEIVED:  you like
+Chat.tsx:637 CHUNK RECEIVED:  me to
+Chat.tsx:637 CHUNK RECEIVED:  explore more
+Chat.tsx:637 CHUNK RECEIVED:  details about
+Chat.tsx:637 CHUNK RECEIVED:  any specific
+Chat.tsx:637 CHUNK RECEIVED:  plan or
+Chat.tsx:637 CHUNK RECEIVED:  device feature?
+Chat.tsx:637 CHUNK RECEIVED: 
+[SQL_RESULTS][{"table": "CombinedDevice", "query": "SELECT * FROM CombinedDevice WHERE (device_name LIKE '%iPhone 16%' OR device_name LIKE '%iPhone16%') AND storage LIKE '%128GB%' AND brand_name LIKE '%eand%' AND device_type LIKE '%Smartphones%' AND amount > 0 AND amount IS NOT NULL AND run_id = (SELECT MAX(run_id) FROM CombinedDevice WHERE brand_name LIKE '%eand%') ORDER BY LEN(device_name) ASC;", "results": [{"internal_id": 9150, "id": "68d52a6b6b4db44c34a8a7b2", "amount": 2789, "amount_before_discount": 3399, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Camera Control. Get the perfect photo. While barely lifting a finger.", "device_name": "iPhone 16 ", "device_type": "smartphones", "is_preorder": false, "installment_amount_for_12_months": 256, "installment_amount_for_18_months": 172, "installment_amount_for_24_months": 123, "is_new": "1", "limited_offer": "Limited time offer 17% Off", "processed_at": "2025-09-25T15:41:30.358000", "run_id": 244, "segment": "consumer", "storage": "128GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2540034&skuId=bgSku3820238334", "vat_included": true, "vat_percentage": "5%", "display": "6.1-inch Super Retina XDR display", "operating_system": "iOS 18", "processor": "A18 chip", "warranty": "1 Year", "battery": "Video playback Up to 22 hours", "camera_details": "Advanced dual-camera system\r\n48MP Fusion 12MP Ultra Wide", "memory": "6GB", "color": "White", "product_id": "prod2540034", "item_id": "bgSku3820238334", "additional_specifications": "max_allowed_quantity : 3\ncategories : ['Smart phones', 'Smartphone', 'Back to School Smartphones']\ncamera_control : an easier way to quickly access camera tools\ncharging_technology : MagSafe wireless charging up to 25W with 30W adapter or higher", "amount_with_vat": 2789, "amount_without_vat": 2656, "allow_smartpay": true, "allow_onetime_payment": true, "vat_eligible": true, "allow_payment_with_loyalty_points": true, "images": "['https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-1-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-2-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-3-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-4-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-5-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-6-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-7-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-8-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-white-p-9-large.jpg']", "smile_points": 328118, "front_camera": "12MP", "rear_camera": "Advanced dual-camera system, 48MP Fusion: 26 mm, \u0192/1.6 aperture, sensor-shift optical image stabilization, 100% Focus Pixels", "features": "fast track to your favorite feature", "whats_in_the_box": "iPhone 16 with iOS 18 USB-C Charge Cable", "network": "5G", "design": "aerospace-grade aluminum, Ceramic Shield,water, and dust resistant", "sim_type": "Nano-SIM +\u00a0eSIM"}, {"internal_id": 9342, "id": "68d52a6d6b4db44c34a8a933", "amount": 2705, "amount_before_discount": 3399, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Camera Control. Get the perfect photo. While barely lifting a finger.", "device_name": "iPhone 16 ", "device_type": "smartphones", "is_preorder": false, "installment_amount_for_12_months": 226, "installment_amount_for_18_months": 151, "installment_amount_for_24_months": 113, "is_new": "0", "limited_offer": "Limited time offer 20% Off", "processed_at": "2025-09-25T15:41:32.348000", "run_id": 244, "segment": "consumer", "storage": "128GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod1T1746000765939&skuId=bgskuTrans3820238334_S", "vat_included": true, "vat_percentage": "5%", "display": "6.1-inch Super Retina XDR display", "operating_system": "iOS 18", "processor": "A18 chip", "warranty": "1 Year ", "battery": "Video playback Up to 22 hours", "camera_details": "camera_control : an easier way to quickly access camera tools", "color": "White ", "product_id": "prod1T1746000765939", "item_id": "bgskuTrans3820238334_S", "additional_specifications": "action_button : fast track to your favorite feature", "amount_with_vat": 2705, "amount_without_vat": 2576, "allow_smartpay": true, "allow_onetime_payment": true, "vat_eligible": true, "allow_payment_with_loyalty_points": true, "images": "['https://www.etisalat.ae/content/dam/etisalat/consumer/2024
+Chat.tsx:639 SQL_RESULTS marker detected in chunk
+Chat.tsx:637 CHUNK RECEIVED: mera": "Advanced dual-camera system, 48MP Fusion: 26 mm, \u0192/1.6 aperture, sensor-shift optical image stabilization, 100% Focus Pixels", "features": "fast track to your favorite feature", "whats_in_the_box": "iPhone 16 Plus  with iOS 18 USB-C Charge Cable", "network": "5G", "design": "Ceramic Shield,water and dust resistant", "sim_type": "Nano-SIM +\u00a0eSIM"}, {"internal_id": 11982, "id": "68d52a8d6b4db44c34a8be0f", "amount": 3085, "amount_before_discount": 3799, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Camera Control. Get the perfect photo. While barely lifting a finger.", "device_name": "iPhone 16 Plus ", "device_type": "smartphones", "is_preorder": false, "installment_amount_for_12_months": 258, "installment_amount_for_18_months": 172, "installment_amount_for_24_months": 129, "is_new": "0", "limited_offer": "Limited time offer 18% Off", "processed_at": "2025-09-25T15:42:05.097000", "run_id": 244, "segment": "consumer", "storage": "128GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod1T1746178244836_S&skuId=bgskuTrans3820238400_S", "vat_included": true, "vat_percentage": "5%", "display": "6.7-inch Super Retina XDR display", "operating_system": "iOS 18", "processor": "A18 chip", "warranty": "1 Year ", "battery_details": "power_and_battery : Video playback Up to 27 hours", "camera_details": "camera_control : an easier way to quickly access camera tools", "color": "Ultramarine", "product_id": "prod1T1746178244836_S", "item_id": "bgskuTrans3820238400_S", "additional_specifications": "action_button : fast track to your favorite feature", "amount_with_vat": 3085, "amount_without_vat": 2938, "allow_smartpay": true, "allow_onetime_payment": true, "vat_eligible": true, "allow_payment_with_loyalty_points": true, "images": "['https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-1-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-2-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-3-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-4-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-5-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-6-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-7-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-8-large.jpg', 'https://www.etisalat.ae/content/dam/etisalat/consumer/2024/catalog/smartphones/apple/iphone-16-plus-ultramarine-p-9-large.jpg']", "smile_points": 362943, "promotion": "Staff Offer", "front_camera": "12MP", "design": "Ceramic Shield,water and dust resistant", "main_camera": "Advanced dual-camera system, 48MP Fusion: 26 mm, \u0192/1.6 aperture, sensor-shift optical image stabilization, 100% Focus Pixels", "apple_intelligence": "apple Intelligence is the personal intelligence system"}, {"internal_id": 12039, "id": "68d52a8e6b4db44c34a8be81", "amount": 3189, "amount_before_discount": 3799, "availability": "Out of Stock", "brand": "Apple", "brand_name": "eand", "description": "Camera Control. Get the perfect photo. While barely lifting a finger.", "device_name": "iPhone 16 Plus ", "device_type": "smartphones", "is_preorder": false, "installment_amount_for_12_months": 293, "installment_amount_for_18_months": 195, "installment_amount_for_24_months": 139, "is_new": "1", "limited_offer": "Limited time offer 16% Off", "processed_at": "2025-09-25T15:42:05.976000", "run_id": 244, "segment": "consumer", "storage": "128GB", "url": "https://www.etisalat.ae/b2c/eshop/device-configuration?productId=prod2540042&skuId=bgSku3820238400", "vat_included": true, "vat_percentage": "5%", "display": "6.7-inch Super Retina XDR display", "operating_system": "iOS 18", "processor": "A18 chip", "warranty": "1 Year", "battery": "Video playback Up to 27 hours", "camera_details": "Latest-generation Photographic Styles", "memory": "8GB", "color": "Ultramarine", "product_id": "prod2540042", "item_id": "bgSku3820238400", "additional_specifications": "max_allowed_quantity : 3\ncategories : ['Smart phones', 'Smartphone', 'Back to School Smartphones']\ncamera_control : an easier way to quickly access camera tools\ncharging_technology : MagSafe wireless charging up to 25W with 30W adapter or higher", "amount_with_vat": 3189, "amount_without_vat": 3037, "allow_smartpay": true, "allow_onetime_payment": true, "vat_eligible": true, "allow_payment_with_loyalty_points": true, "images": "['https://www.etisalat.ae/content/dam/etisalat/consumer/2024/
+Chat.tsx:637 CHUNK RECEIVED: -09-26T22:23:07.204000", "run_id": 245, "seasonal_offer": "0", "vat_included": 1, "vat_percentage": "5", "contract": "1", "time_commitment": "12-month Commitment"}, {"internal_id": 1205, "is_new": false, "segment": "consumer", "brand_name": "Du", "name_of_plan": "Data-Only SIM 10 GB", "amount": 149, "type_of_plan": "Postpaid", "url": "https://shop.du.ae/en/personal/s-du-datasim-plans", "local_data": "10 GB", "description": "Stay connected on all your 4G and 5G mobile devices.", "best_seller": "0", "additional_benefits": "Free SIM and delivery, High-speed 4G & 5G data network", "amount_details": "Includes VAT", "billing_cycle": "per month", "delivery_options": "Free 1 hour delivery", "id": "68d7124c6b4db44c34aca405-Data-Only SIM 10 GB-1", "limited_offer": "1", "processed_at": "2025-09-26T22:23:07.204000", "run_id": 245, "seasonal_offer": "0", "vat_included": 1, "vat_percentage": "5", "contract": "1", "time_commitment": "12-month Commitment"}, {"internal_id": 1209, "is_new": false, "segment": "consumer", "brand_name": "Du", "name_of_plan": "Data-Only SIM 50 GB", "amount": 279, "type_of_plan": "Postpaid", "url": "https://shop.du.ae/en/personal/s-du-datasim-plans", "local_data": "50 GB", "description": "Stay connected on all your 4G and 5G mobile devices.", "best_seller": "0", "additional_benefits": "Free SIM and delivery, High-speed 4G & 5G data network, OSN+ for 12 months", "amount_details": "Includes VAT", "billing_cycle": "per month", "delivery_options": "Free 1 hour delivery", "id": "68d7124c6b4db44c34aca405-Data-Only SIM 50 GB-2", "limited_offer": "1", "processed_at": "2025-09-26T22:23:07.204000", "run_id": 245, "seasonal_offer": "0", "vat_included": 1, "vat_percentage": "5", "contract": "1", "time_commitment": "12-month Commitment"}]}][END_SQL_RESULTS]
+Chat.tsx:923 Chat interaction completed - messages should be persisted by backend
