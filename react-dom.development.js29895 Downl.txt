@@ -586,28 +586,29 @@ const Chat: React.FC = () => {
       // Update sessionId state with current session
       setSessionId(currentSessionId);
 
-      // Start streaming - only send query per OpenAPI spec
-      const stream = await apiClient.chat({
-        query: messageText,
+// --- Start streaming ---
 
-        session_id: currentSessionId!, // <— pass it explicitly
+const stream = await apiClient.chat({
 
-        web_search_enabled: webSearch, // <— pass it explicitly
-      });
+  query: messageText,
 
-      console.log("Stream received:", stream);
+  session_id: currentSessionId!,
 
-      const reader = stream.getReader();
+  web_search_enabled: webSearch,
+
+});
+ 
+const reader = stream.getReader();
 
 const decoder = new TextDecoder();
+ 
+let fullAssistantBuffer = ""; // <--- buffer for entire assistant response
  
 while (true) {
 
   const { done, value } = await reader.read();
 
   if (done) {
-
-    // Finalize: mark as not streaming, but don't clear results/content
 
     setMessages(prev =>
 
@@ -626,77 +627,17 @@ while (true) {
     break;
 
   }
- 
+
   const chunk = decoder.decode(value, { stream: true });
 
   if (!chunk.trim()) continue;
  
-  // Try to parse events (SSE)
+  fullAssistantBuffer += chunk; // <--- collect
+ 
+  // ---- your event/stream logic (keep this) ----
 
   const events = streamParserRef.current.parse(chunk);
-  console.log("CHUNK RECEIVED:", chunk);
-
-  if (chunk.includes('[SQL_RESULTS]')) console.log("SQL_RESULTS marker detected in chunk");
-
-if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in chunk");
-
  
-
-  // === PATCH START: Show live results panel for SQL/WEB blocks ===
-  
-  if (chunk.includes('[SQL_RESULTS]') && chunk.includes('[END_SQL_RESULTS]')) {
-  
-    try {
-  
-      const sqlBlock = chunk.split('[SQL_RESULTS]')[1].split('[END_SQL_RESULTS]')[0].trim();
-  
-      const parsedSql = JSON.parse(sqlBlock);
-  
-      const sqlResults = normalizeResults(parsedSql, 'sql');
-  
-      if (sqlResults && sqlResults.length > 0) {
-  
-        setResultsPanelData({ sql: sqlResults, web: [], embedding: [] });
-  
-        setResultsPanelType('sql');
-  
-        setShowResultsPanel(true);
-  
-      }
-  
-    } catch {}
-  
-  }
-  
-  if (chunk.includes('[WEB_RESULTS]') && chunk.includes('[END_WEB_RESULTS]')) {
-  
-    try {
-  
-      const webBlock = chunk.split('[WEB_RESULTS]')[1].split('[END_WEB_RESULTS]')[0].trim();
-  
-      const parsedWeb = JSON.parse(webBlock);
-  
-      setResultsPanelData(prevData => {
-  
-        const currentSql = prevData?.sql || [];
-  
-        const webResults = normalizeResults(parsedWeb, 'web');
-  
-        return { sql: currentSql, web: webResults, embedding: [] };
-  
-      });
-  
-      setResultsPanelType('web');
-  
-      setShowResultsPanel(true);
-  
-    } catch {}
-  
-  }
-  
-  // === PATCH END ===
-  
-    
   if (events.length > 0) {
 
     for (const event of events) {
@@ -718,8 +659,6 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
           break;
  
         case "token":
-
-          // Add tokens to content in React state only
 
           setMessages(prev =>
 
@@ -752,7 +691,7 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
           const normalizedWeb = normalizeResults(event.payload.web || [], "web");
 
           const normalizedEmbedding = normalizeResults(event.payload.embedding || [], "embedding");
-
+ 
           setMessages(prev =>
 
             prev.map(m =>
@@ -778,7 +717,7 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
             )
 
           );
-
+ 
           setResultsPanelData({
 
             sql: normalizedSql,
@@ -788,7 +727,7 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
             embedding: normalizedEmbedding,
 
           });
-
+ 
           setResultsPanelType(
 
             normalizedWeb.length > 0
@@ -806,7 +745,7 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
               : ""
 
           );
-
+ 
           setShowResultsPanel(true);
 
           break;
@@ -908,7 +847,155 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
   }
 
 }
+ 
+// === PATCH: At the end of streaming, attach extracted results to last assistant message ===
 
+setMessages(prev => {
+
+  const lastAssistantIdx = prev.findIndex(
+
+    m => m.id === currentInteractionIdRef.current && m.sender === "assistant"
+
+  );
+
+  if (lastAssistantIdx === -1) return prev;
+ 
+  let sqlResults: NormalizedResult[] = [];
+
+  let webResults: NormalizedResult[] = [];
+ 
+  // Parse SQL results
+
+  const sqlMatch = fullAssistantBuffer.match(/\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/);
+
+  if (sqlMatch) {
+
+    try {
+
+      const sqlJson = JSON.parse(sqlMatch[1]);
+
+      sqlResults = normalizeResults(sqlJson, "sql");
+
+    } catch (err) {}
+
+  }
+ 
+  // Parse WEB results
+
+  const webMatch = fullAssistantBuffer.match(/\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/);
+
+  if (webMatch) {
+
+    try {
+
+      const webJson = JSON.parse(webMatch[1]);
+
+      webResults = normalizeResults(webJson, "web");
+
+    } catch (err) {}
+
+  }
+ 
+  return prev.map((m, idx) =>
+
+    idx === lastAssistantIdx
+
+      ? {
+
+          ...m,
+
+          sqlResults,
+
+          webResults,
+
+        }
+
+      : m
+
+  );
+
+});
+
+ 
+      // --- PATCH: Attach extracted results to the last assistant message ---
+
+setMessages(prev => {
+
+  // Find the last assistant message (streamed one)
+
+  const lastAssistantIdx = prev.findIndex(
+
+    m => m.id === currentInteractionIdRef.current && m.sender === "assistant"
+
+  );
+
+  if (lastAssistantIdx === -1) return prev;
+ 
+  let sqlResults: NormalizedResult[] = [];
+
+  let webResults: NormalizedResult[] = [];
+ 
+  // Extract from buffer
+
+  const sqlMatch = fullAssistantBuffer.match(/\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/);
+
+  if (sqlMatch) {
+
+    try {
+
+      const sqlJson = JSON.parse(sqlMatch[1]);
+
+      sqlResults = normalizeResults(sqlJson, "sql");
+
+    } catch (err) {
+
+      // ignore parse errors
+
+    }
+
+  }
+
+  const webMatch = fullAssistantBuffer.match(/\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/);
+
+  if (webMatch) {
+
+    try {
+
+      const webJson = JSON.parse(webMatch[1]);
+
+      webResults = normalizeResults(webJson, "web");
+
+    } catch (err) {
+
+      // ignore parse errors
+
+    }
+
+  }
+ 
+  // Patch the assistant message
+
+  return prev.map((m, idx) =>
+
+    idx === lastAssistantIdx
+
+      ? {
+
+          ...m,
+
+          sqlResults,
+
+          webResults,
+
+        }
+
+      : m
+
+  );
+
+});
+
+  
  
 
       // Finalize the assistant message
@@ -1155,79 +1242,7 @@ if (chunk.includes('[WEB_RESULTS]')) console.log("WEB_RESULTS marker detected in
   });
 
 
-  useEffect(() => {
-
-    if (messages.length === 0) return;
-   
-    const lastMsg = messages[messages.length - 1];
   
-    if (lastMsg.sender !== "assistant" || lastMsg.isStreaming) return;
-   
-    // Look for [SQL_RESULTS]... or [WEB_RESULTS]... in the final content
-  
-    const sqlMatch = lastMsg.content.match(/\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/);
-  
-    const webMatch = lastMsg.content.match(/\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/);
-   
-    if (sqlMatch) {
-  
-      try {
-  
-        const sqlJson = JSON.parse(sqlMatch[1]);
-  
-        const sqlResults = normalizeResults(sqlJson, "sql");
-  
-        setResultsPanelData((old) => ({
-  
-          ...(old || {}),
-  
-          sql: sqlResults,
-  
-        }));
-  
-        setResultsPanelType("sql");
-  
-        setShowResultsPanel(true);
-  
-      } catch (err) {
-  
-        // Optional: show parse error
-  
-      }
-  
-    }
-  
-    if (webMatch) {
-  
-      try {
-  
-        const webJson = JSON.parse(webMatch[1]);
-  
-        const webResults = normalizeResults(webJson, "web");
-  
-        setResultsPanelData((old) => ({
-  
-          ...(old || {}),
-  
-          web: webResults,
-  
-        }));
-  
-        setResultsPanelType("web");
-  
-        setShowResultsPanel(true);
-  
-      } catch (err) {
-  
-        // Optional: show parse error
-  
-      }
-  
-    }
-  
-  }, [messages]);
-  
-   
 
   return (
     <SidebarProvider>
