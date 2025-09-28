@@ -22,6 +22,14 @@ interface ResultsModalProps {
   activeTab: 'sql' | 'embedding' | 'web' | 'all';
 }
 
+const PRIORITY_COLS = [
+  'result_source', 'table', 'title', 'name', 'device_name',
+  'id', 'primary_id', 'internal_id', 'product_id',
+  'result_score', 'availability', 'amount',
+  // synthetic embedding columns added below:
+  'embedding_len', 'embedding_preview'
+];
+
 const ResultsModal: React.FC<ResultsModalProps> = ({
   isOpen,
   onClose,
@@ -32,12 +40,10 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
   const [selectedTab, setSelectedTab] = useState<string>(activeTab);
   const { toast } = useToast();
 
-  // Keep modal tab in sync with prop when opened
   useEffect(() => {
     if (isOpen) setSelectedTab(activeTab);
   }, [activeTab, isOpen]);
 
-  // Extract SQL query if present in any SQL record
   const getSqlQuery = () => {
     for (const r of allResults.sql || []) {
       const rec = (r as any).record || r;
@@ -47,7 +53,6 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
     return null;
   };
 
-  // Which data set are we showing now?
   const getCurrentTabData = (): NormalizedResult[] => {
     switch (selectedTab) {
       case 'all':
@@ -63,82 +68,78 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
     }
   };
 
-  // ---- Shape-tolerant row extraction ----
-  // Accepts:
-  //  1) normalized: { record: {...} }
-  //  2) flattened: { ...rowFields }
-  //  3) nested: { results: [ {...}, ... ] }
-  const getTableRowsWithSource = (results: NormalizedResult[]) => {
-    const rows: { row: any; source: string }[] = [];
+  // Make a shallow copy and attach synthetic embedding summary if present.
+  const attachEmbeddingSummary = (row: any) => {
+    const copy: any = { ...row };
+    const emb = row?.embedding ?? row?.vector ?? row?.embedding_vector ?? null;
+    if (Array.isArray(emb)) {
+      copy.embedding_len = emb.length;
+      copy.embedding_preview = emb.slice(0, 5).join(', ');
+    }
+    return copy;
+  };
+
+  // Extract rows and preserve/derive a reliable source label.
+  const getRowsWithSource = (results: NormalizedResult[]) => {
+    const out: { row: any; source: 'sql' | 'embedding' | 'web' | string }[] = [];
 
     results.forEach((item: any) => {
-      const baseSource =
-        item?.result_source || item?.source || item?.type || selectedTab;
+      const baseSource = (item?.result_source || item?.source || item?.type || '').toString().toLowerCase();
 
-      // 1) normalized
+      // normalized shape
       if (item?.record && typeof item.record === 'object') {
-        rows.push({ row: item.record, source: baseSource });
+        out.push({ row: attachEmbeddingSummary(item.record), source: baseSource as any });
         return;
       }
 
-      // 2) nested list
+      // nested results[]
       if (Array.isArray(item?.results)) {
         item.results.forEach((r: any) => {
-          rows.push({
-            row: r,
-            source: r?.result_source || baseSource
-          });
+          const s = (r?.result_source || baseSource || 'sql').toString().toLowerCase();
+          out.push({ row: attachEmbeddingSummary(r), source: s as any });
         });
         return;
       }
 
-      // 3) flattened
+      // flattened row
       if (item && typeof item === 'object') {
-        rows.push({ row: item, source: baseSource });
+        out.push({ row: attachEmbeddingSummary(item), source: baseSource as any });
       }
     });
 
-    return rows;
+    // Final safety filter by selected tab (prevents SQL showing embedding rows and vice-versa)
+    if (selectedTab === 'sql')   return out.filter(x => x.source === 'sql');
+    if (selectedTab === 'embedding') return out.filter(x => x.source === 'embedding');
+    if (selectedTab === 'web')   return out.filter(x => x.source === 'web');
+    return out; // 'all'
   };
 
-  const getTableColumns = (rowsWithSource: { row: any }[]) => {
-    const cols = new Set<string>();
-    rowsWithSource.forEach(({ row }) => {
-      Object.keys(row || {}).forEach((k) => cols.add(k));
-    });
-    return Array.from(cols);
+  const getOrderedColumns = (rowsWithSource: { row: any }[]) => {
+    const all = new Set<string>();
+    rowsWithSource.forEach(({ row }) => Object.keys(row || {}).forEach(k => all.add(k)));
+
+    // Keep priority cols first (only those that actually exist), then the rest alphabetically
+    const presentPriority = PRIORITY_COLS.filter(c => all.has(c));
+    const rest = Array.from(all).filter(c => !presentPriority.includes(c)).sort((a,b)=>a.localeCompare(b));
+    return [...presentPriority, ...rest];
   };
 
-  // CSV export uses the tolerant rows
   const exportCSV = () => {
-    const currentData = getCurrentTabData();
-    const rowsWithSource = getTableRowsWithSource(currentData);
-    const rows = rowsWithSource.map((r) => r.row);
-
-    if (rows.length === 0) {
-      toast({
-        title: 'No data to export',
-        description: 'The current tab has no data to export.',
-        variant: 'destructive'
-      });
+    const rowsWithSource = getRowsWithSource(getCurrentTabData());
+    if (rowsWithSource.length === 0) {
+      toast({ title: 'No data to export', description: 'The current tab has no data to export.', variant: 'destructive' });
       return;
     }
-
-    const columns = getTableColumns(rowsWithSource);
-    const header = columns.join(',');
-    const body = rows.map((row) =>
-      columns
-        .map((col) => {
-          const v = row[col];
-          if (v === null || v === undefined) return '';
-          const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-          return s.includes(',') || s.includes('"') || s.includes('\n')
-            ? `"${s.replace(/"/g, '""')}"`
-            : s;
-        })
-        .join(',')
+    const cols = getOrderedColumns(rowsWithSource);
+    const header = cols.join(',');
+    const body = rowsWithSource.map(({ row }) =>
+      cols.map(col => {
+        const v = row[col];
+        if (v === null || v === undefined) return '';
+        const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(',')
     );
-
     const csv = [header, ...body].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -147,25 +148,18 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
     a.download = `${selectedTab}-results-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-
     toast({ title: 'CSV exported', description: `${selectedTab} results exported.` });
   };
 
-  // ---- Renderers ----
   const renderWebResults = () => {
     const webResults = allResults.web || [];
-
     if (webResults.length === 0) {
-      return (
-        <Card className="p-4">
-          <p>No web results available.</p>
-        </Card>
-      );
+      return <Card className="p-4"><p>No web results available.</p></Card>;
     }
 
     return (
       <div className="space-y-4">
-        {webResults.map((result: any, index: number) => {
+        {webResults.map((result: any, i: number) => {
           const record = result.record || result || {};
           const title = record.title || result.title || 'No title';
           const url = record.url || result.url || '';
@@ -174,16 +168,13 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
 
           let domain = 'Unknown source';
           try {
-            if (url) {
-              const u = new URL(url);
-              domain = u.hostname.replace('www.', '');
-            }
+            if (url) domain = new URL(url).hostname.replace('www.', '');
           } catch {
             domain = (url?.split?.('/')?.[2] || '').replace('www.', '') || 'Unknown source';
           }
 
           return (
-            <Card key={index} className="p-4">
+            <Card key={i} className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Globe className="w-4 h-4" />
@@ -197,9 +188,7 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
                   <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                     {title}
                   </a>
-                ) : (
-                  title
-                )}
+                ) : title}
               </h4>
 
               {url && (
@@ -207,27 +196,13 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
                   <a href={url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:underline truncate">
                     {url}
                   </a>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigator.clipboard.writeText(url)}
-                    className="p-1 h-auto"
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(url)} className="p-1 h-auto">
                     <Copy className="w-3 h-3" />
                   </Button>
                 </div>
               )}
 
               <p className="text-sm text-muted-foreground mb-3">{content}</p>
-
-              {url && (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={url} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="w-3 h-3 mr-1" />
-                    Visit Website
-                  </a>
-                </Button>
-              )}
             </Card>
           );
         })}
@@ -236,18 +211,14 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
   };
 
   const renderTableResults = () => {
-    const currentData = getCurrentTabData();
-    const rowsWithSource = getTableRowsWithSource(currentData);
+    const data = getCurrentTabData();
+    const rowsWithSource = getRowsWithSource(data);
 
     if (rowsWithSource.length === 0) {
-      return (
-        <Card className="p-4">
-          <p>No {selectedTab} results available.</p>
-        </Card>
-      );
+      return <Card className="p-4"><p>No {selectedTab} results available.</p></Card>;
     }
 
-    const columns = getTableColumns(rowsWithSource);
+    const columns = getOrderedColumns(rowsWithSource);
     const sqlQuery = selectedTab === 'sql' ? getSqlQuery() : null;
 
     return (
@@ -259,10 +230,8 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
             <thead className="bg-muted">
               <tr>
                 {selectedTab === 'all' && <th className="p-2 text-left">Source</th>}
-                {columns.map((column) => (
-                  <th key={column} className="p-2 text-left font-medium" title={column}>
-                    {column}
-                  </th>
+                {columns.map((c) => (
+                  <th key={c} className="p-2 text-left font-medium" title={c}>{c}</th>
                 ))}
               </tr>
             </thead>
@@ -272,7 +241,7 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
                   {selectedTab === 'all' && (
                     <td className="p-2">
                       <Badge variant={source === 'embedding' ? 'default' : 'secondary'}>
-                        {source === 'embedding' ? 'Embedding' : 'SQL'}
+                        {source === 'embedding' ? 'Embedding' : source.toString().toUpperCase()}
                       </Badge>
                     </td>
                   )}
@@ -314,12 +283,7 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
         <DialogHeader className="flex-shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle>{title}</DialogTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={exportCSV}
-              disabled={getCurrentTabData().length === 0}
-            >
+            <Button variant="outline" size="sm" onClick={exportCSV} disabled={getRowsWithSource(getCurrentTabData()).length === 0}>
               <Download className="w-3 h-3 mr-1" />
               Export CSV
             </Button>
@@ -335,25 +299,15 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
                 </TabsTrigger>
               )}
               {hasSQL && <TabsTrigger value="sql">SQL Results ({(allResults.sql || []).length})</TabsTrigger>}
-              {hasEmbedding && (
-                <TabsTrigger value="embedding">Embedding Results ({(allResults.embedding || []).length})</TabsTrigger>
-              )}
+              {hasEmbedding && <TabsTrigger value="embedding">Embedding Results ({(allResults.embedding || []).length})</TabsTrigger>}
               {hasWeb && <TabsTrigger value="web">Web Results ({(allResults.web || []).length})</TabsTrigger>}
             </TabsList>
 
             <div className="flex-1 overflow-hidden">
-              <TabsContent value="all" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
-              </TabsContent>
-              <TabsContent value="sql" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
-              </TabsContent>
-              <TabsContent value="embedding" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
-              </TabsContent>
-              <TabsContent value="web" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderWebResults()}
-              </TabsContent>
+              <TabsContent value="all" className="h-full overflow-y-auto max-h-[65vh] p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="sql" className="h-full overflow-y-auto max-h-[65vh] p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="embedding" className="h-full overflow-y-auto max-h-[65vh] p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="web" className="h-full overflow-y-auto max-h-[65vh] p-1">{renderWebResults()}</TabsContent>
             </div>
           </Tabs>
         </div>
