@@ -1,14 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { NormalizedResult } from '@/components/results/types';
-import TableEnhancer from '@/components/tables/TableEnhancer';
-import SqlQueryDisplay from './SqlQueryDisplay';
-import { Download } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import React, { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { NormalizedResult } from "@/components/results/types";
+import TableEnhancer from "@/components/tables/TableEnhancer";
+import SqlQueryDisplay from "./SqlQueryDisplay";
+import { Globe, ExternalLink, Copy, Download } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface ResultsModalProps {
   isOpen: boolean;
@@ -19,8 +19,7 @@ interface ResultsModalProps {
     embedding: NormalizedResult[];
     web: NormalizedResult[];
   };
-  /** which tab caller wants to show first */
-  activeTab: 'sql' | 'embedding' | 'web' | 'all';
+  activeTab: "sql" | "embedding" | "web" | "all";
 }
 
 const ResultsModal: React.FC<ResultsModalProps> = ({
@@ -32,9 +31,25 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
 }) => {
   const { toast } = useToast();
 
-  const sqlData = allResults.sql ?? [];
-  const embData = allResults.embedding ?? [];
-  const webData = allResults.web ?? [];
+  // 1) Normalize buckets in case the caller mixed sources into sql
+  const normalized = useMemo(() => {
+    const inputSQL = allResults.sql ?? [];
+    const inputEMB = allResults.embedding ?? [];
+    const inputWEB = allResults.web ?? [];
+
+    const fromSqlEmb = inputSQL.filter((r) => r.result_source === "embedding");
+    const pureSql = inputSQL.filter((r) => r.result_source !== "embedding");
+
+    return {
+      sql: pureSql,
+      embedding: [...inputEMB, ...fromSqlEmb],
+      web: inputWEB,
+    };
+  }, [allResults]);
+
+  const sqlData = normalized.sql;
+  const embData = normalized.embedding;
+  const webData = normalized.web;
 
   const sqlCount = sqlData.length;
   const embCount = embData.length;
@@ -45,53 +60,52 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
   const hasEmbedding = embCount > 0;
   const hasWeb = webCount > 0;
 
-  // Which tab is visible
-  const [selectedTab, setSelectedTab] = useState<string>('all');
-
-  // Ensure a tab is selected as soon as the modal opens (no extra click)
+  // 2) Selected tab (auto-pick on open)
+  const [selectedTab, setSelectedTab] = useState<string>("all");
   useEffect(() => {
     if (!isOpen) return;
 
-    // If caller passed a preferred tab and it has data, honor it
-    const preferred = activeTab ?? 'all';
-    const tabHasData =
-      (preferred === 'all' && allCount > 0) ||
-      (preferred === 'sql' && hasSQL) ||
-      (preferred === 'embedding' && hasEmbedding) ||
-      (preferred === 'web' && hasWeb);
+    // prefer caller’s choice when it has data
+    const preferred = activeTab ?? "all";
+    const ok =
+      (preferred === "all" && allCount > 0) ||
+      (preferred === "sql" && hasSQL) ||
+      (preferred === "embedding" && hasEmbedding) ||
+      (preferred === "web" && hasWeb);
 
-    if (tabHasData) {
+    if (ok) {
       setSelectedTab(preferred);
-      return;
+    } else if (hasSQL && hasEmbedding) {
+      setSelectedTab("all");
+    } else if (hasSQL) {
+      setSelectedTab("sql");
+    } else if (hasEmbedding) {
+      setSelectedTab("embedding");
+    } else if (hasWeb) {
+      setSelectedTab("web");
+    } else {
+      setSelectedTab("all");
     }
-
-    // Otherwise pick the first available in this priority
-    if (hasSQL && hasEmbedding) setSelectedTab('all');
-    else if (hasSQL) setSelectedTab('sql');
-    else if (hasEmbedding) setSelectedTab('embedding');
-    else if (hasWeb) setSelectedTab('web');
-    else setSelectedTab('all');
   }, [isOpen, activeTab, hasSQL, hasEmbedding, hasWeb, allCount]);
 
-  // Build the dataset for the active tab
+  // 3) Data for the active tab
   const currentData: NormalizedResult[] = useMemo(() => {
     switch (selectedTab) {
-      case 'sql':
+      case "sql":
         return sqlData;
-      case 'embedding':
+      case "embedding":
         return embData;
-      case 'web':
+      case "web":
         return webData;
-      case 'all':
+      case "all":
       default:
-        // show SQL + Embedding together in “All”
         return [...sqlData, ...embData];
     }
   }, [selectedTab, sqlData, embData, webData]);
 
-  // Try to surface the SQL query (if present)
+  // 4) SQL query preview (only for SQL tab)
   const sqlQuery = useMemo(() => {
-    if (selectedTab !== 'sql') return null;
+    if (selectedTab !== "sql") return null;
     for (const r of sqlData) {
       if (r.record?.query) return r.record.query;
       if (r.record?.sql) return r.record.sql;
@@ -99,141 +113,175 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
     return null;
   }, [selectedTab, sqlData]);
 
-  // Build columns (prioritize common keys, but include everything)
+  // 5) Columns (union) with sensible order
   const columns = useMemo(() => {
     const set = new Set<string>();
     currentData.forEach((r) => Object.keys(r.record || {}).forEach((k) => set.add(k)));
 
-    // seed + priority ordering
     const priority = [
-      'table',
-      'title',
-      'name',
-      'device_name',
-      'plan_name',
-      'content',
-      'snippet',
-      'primary_id',
-      'internal_id',
-      'product_id',
-      'amount',
-      'availability',
-      'brand',
-      'brand_name',
-      'description',
-      'device_type',
-      'is_new',
-      'timestamp',
+      "table",
+      "title",
+      "name",
+      "device_name",
+      "plan_name",
+      "question",
+      "primary_id",
+      "internal_id",
+      "product_id",
+      "amount",
+      "availability",
+      "brand",
+      "brand_name",
+      "description",
+      "device_type",
+      "is_new",
+      "timestamp",
+      "content",
+      "snippet",
     ];
-
-    // helpful fallbacks for embedding records that often only have title/content
-    if (selectedTab === 'embedding' || selectedTab === 'all') {
-      ['table', 'title', 'content', 'snippet'].forEach((k) => set.add(k));
-    }
-
     const rest = Array.from(set).filter((k) => !priority.includes(k));
     return [...priority.filter((k) => set.has(k)), ...rest];
-  }, [currentData, selectedTab]);
+  }, [currentData]);
 
-  const renderCellValue = (r: NormalizedResult, key: string) => {
-    let v = r.record?.[key];
-
-    // smart fallbacks
-    if (v == null) {
-      if (key === 'table') v = r.table ?? r.record?.table_name;
-      else if (key === 'title') v = r.title ?? r.record?.name ?? r.record?.device_name ?? r.record?.plan_name;
-      else if (key === 'content' || key === 'snippet') v = r.record?.content ?? r.record?.snippet;
-    }
-
-    if (v == null) return <span className="text-muted-foreground italic">null</span>;
-    if (typeof v === 'object') return <code className="text-xs bg-muted px-1 py-0.5 rounded">{JSON.stringify(v)}</code>;
-    return String(v);
-  };
-
+  // 6) CSV export
   const exportCSV = () => {
-    const rows = currentData.map((r) => r.record).filter(Boolean);
-    if (rows.length === 0) {
-      toast({
-        title: 'No data to export',
-        description: 'The current tab has no data to export.',
-        variant: 'destructive',
-      });
+    if (currentData.length === 0) {
+      toast({ title: "No data to export", description: "The current tab has no data to export.", variant: "destructive" });
       return;
     }
-    const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
-    const csvHeader = cols.join(',');
-    const csvRows = rows.map((row) =>
-      cols
-        .map((col) => {
-          const value = row[col];
-          if (value == null) return '';
-          const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
-          return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
-        })
-        .join(',')
-    );
-    const csv = [csvHeader, ...csvRows].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const header = ["result_source", "result_score", ...columns];
+    const rows = currentData.map((r) => {
+      const cells = columns.map((c) => {
+        const v = r.record?.[c];
+        const s = v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      });
+      return [r.result_source ?? "", r.result_score ?? "", ...cells].join(",");
+    });
+    const csv = [header.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `${selectedTab}-results-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast({ title: 'CSV exported', description: `${selectedTab} results have been exported as CSV` });
+    toast({ title: "CSV exported", description: "Download started." });
   };
 
-  const renderTable = () => {
+  // 7) Web results (unchanged)
+  const renderWebResults = () => {
+    if (webCount === 0) return <Card className="p-4"><p>No web results available.</p></Card>;
+    return (
+      <div className="space-y-4">
+        {webData.map((result, i) => {
+          const record = result.record || {};
+          const title = record.title || result.title || "No title";
+          const url = record.url || result.url || "";
+          const content = record.content || record.snippet || "No content";
+          const score = result.result_score || 0;
+
+          let domain = "Unknown source";
+          try { if (url) domain = new URL(url).hostname.replace(/^www\./, ""); } catch {}
+
+          return (
+            <Card key={i} className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Globe className="w-4 h-4" />
+                  <span>{domain}</span>
+                </div>
+                {score > 0 && <Badge variant="secondary">{(score * 100).toFixed(1)}% match</Badge>}
+              </div>
+              <h4 className="font-semibold mb-2">
+                {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{title}</a> : title}
+              </h4>
+              {url && (
+                <div className="flex items-center gap-2 mb-2 text-sm">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:underline truncate">{url}</a>
+                  <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(url)} className="p-1 h-auto" title="Copy URL">
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground mb-3">{content}</p>
+              {url && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-3 h-3 mr-1" />
+                    Visit Website
+                  </a>
+                </Button>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderTableResults = () => {
     if (currentData.length === 0) {
-      return (
-        <Card className="p-4">
-          <p>No {selectedTab} results available.</p>
-        </Card>
-      );
+      const label =
+        selectedTab === "sql" ? "SQL" : selectedTab === "embedding" ? "Embedding" : "result";
+      return <Card className="p-4"><p>No {label} data available.</p></Card>;
     }
 
     return (
       <div className="space-y-4">
-        {sqlQuery && <SqlQueryDisplay query={sqlQuery} />}
+        {selectedTab === "sql" && sqlQuery && <SqlQueryDisplay query={sqlQuery} />}
         <div className="overflow-auto max-h-[60vh]">
           <TableEnhancer>
             <table className="min-w-max w-full text-sm">
               <thead className="sticky top-0 bg-muted z-10">
                 <tr className="border-b">
-                  {selectedTab === 'all' && <th className="p-2 text-left">Source</th>}
+                  {selectedTab === "all" && <th className="p-2 text-left">Source</th>}
                   <th className="p-2 text-left">Score</th>
                   {columns.map((c) => (
-                    <th key={c} className="p-2 text-left font-medium" title={c}>
-                      {c}
-                    </th>
+                    <th key={c} className="p-2 text-left font-medium" title={c}>{c}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="[&>tr>td]:align-top">
-                {currentData.slice(0, 100).map((r, i) => {
-                  const score = typeof r.result_score === 'number' ? r.result_score : Number(r.result_score) || 0;
-                  return (
-                    <tr key={r.id ?? i} className="border-b hover:bg-muted/50 whitespace-nowrap">
-                      {selectedTab === 'all' && (
-                        <td className="p-2">
-                          <Badge variant={r.result_source === 'embedding' ? 'default' : 'secondary'}>
-                            {r.result_source === 'embedding' ? 'Embedding' : 'SQL'}
-                          </Badge>
-                        </td>
-                      )}
-                      <td className="p-2">{score ? score.toFixed(4) : '—'}</td>
-                      {columns.map((c) => (
+                {currentData.slice(0, 100).map((r, idx) => (
+                  <tr key={r.id ?? idx} className="border-b hover:bg-muted/50 whitespace-nowrap">
+                    {selectedTab === "all" && (
+                      <td className="p-2">
+                        <Badge variant={r.result_source === "embedding" ? "default" : "secondary"}>
+                          {r.result_source === "embedding" ? "Embedding" : "SQL"}
+                        </Badge>
+                      </td>
+                    )}
+                    <td className="p-2">
+                      {typeof r.result_score === "number" || !isNaN(Number(r.result_score))
+                        ? Number(r.result_score).toFixed(4)
+                        : "—"}
+                    </td>
+                    {columns.map((c) => {
+                      const v = r.record?.[c];
+                      return (
                         <td key={c} className="p-2">
-                          {renderCellValue(r, c)}
+                          {v == null ? (
+                            <span className="text-muted-foreground italic">null</span>
+                          ) : typeof v === "object" ? (
+                            <code className="text-xs bg-muted px-1 py-0.5 rounded">{JSON.stringify(v)}</code>
+                          ) : (
+                            String(v)
+                          )}
                         </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                      );
+                    })}
+                  </tr>
+                ))}
               </tbody>
             </table>
           </TableEnhancer>
         </div>
+        {currentData.length > 100 && (
+          <Card className="p-3">
+            <p className="text-sm text-muted-foreground">Showing first 100 rows of {currentData.length} total.</p>
+          </Card>
+        )}
       </div>
     );
   };
@@ -256,10 +304,10 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
             <TabsList
               className={`flex-shrink-0 grid w-full ${
                 hasSQL && hasEmbedding && hasWeb
-                  ? 'grid-cols-4'
+                  ? "grid-cols-4"
                   : hasSQL && hasEmbedding
-                  ? 'grid-cols-3'
-                  : 'grid-cols-2'
+                  ? "grid-cols-3"
+                  : "grid-cols-2"
               }`}
             >
               {(hasSQL || hasEmbedding) && (
@@ -285,23 +333,10 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
             </TabsList>
 
             <div className="flex-1 overflow-hidden">
-              <TabsContent value="all" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTable()}
-              </TabsContent>
-              <TabsContent value="sql" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTable()}
-              </TabsContent>
-              <TabsContent value="embedding" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTable()}
-              </TabsContent>
-              <TabsContent value="web" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {/* (You can render your web card view here if you want) */}
-                {webCount === 0 ? (
-                  <Card className="p-4"><p>No web results available.</p></Card>
-                ) : (
-                  renderTable()
-                )}
-              </TabsContent>
+              <TabsContent value="all" className="h-full overflow-y-auto p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="sql" className="h-full overflow-y-auto p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="embedding" className="h-full overflow-y-auto p-1">{renderTableResults()}</TabsContent>
+              <TabsContent value="web" className="h-full overflow-y-auto p-1">{renderWebResults()}</TabsContent>
             </div>
           </Tabs>
         </div>
