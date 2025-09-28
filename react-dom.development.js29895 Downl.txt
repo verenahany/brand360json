@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { NormalizedResult } from '@/components/results/types';
 import TableEnhancer from '@/components/tables/TableEnhancer';
 import SqlQueryDisplay from './SqlQueryDisplay';
-import { Globe, ExternalLink, Copy, Download } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface ResultsModalProps {
@@ -19,6 +19,7 @@ interface ResultsModalProps {
     embedding: NormalizedResult[];
     web: NormalizedResult[];
   };
+  /** which tab caller wants to show first */
   activeTab: 'sql' | 'embedding' | 'web' | 'all';
 }
 
@@ -27,141 +28,162 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
   onClose,
   title,
   allResults,
-  activeTab
+  activeTab,
 }) => {
-  const [selectedTab, setSelectedTab] = useState<string>(activeTab);
   const { toast } = useToast();
 
-  // Extract SQL query from any SQL result that has one
-  const getSqlQuery = () => {
-    for (const result of allResults.sql || []) {
-      if (result.record?.query) return result.record.query;
-      if (result.record?.sql) return result.record.sql;
+  const sqlData = allResults.sql ?? [];
+  const embData = allResults.embedding ?? [];
+  const webData = allResults.web ?? [];
+
+  const sqlCount = sqlData.length;
+  const embCount = embData.length;
+  const webCount = webData.length;
+  const allCount = sqlCount + embCount;
+
+  const hasSQL = sqlCount > 0;
+  const hasEmbedding = embCount > 0;
+  const hasWeb = webCount > 0;
+
+  // Which tab is visible
+  const [selectedTab, setSelectedTab] = useState<string>('all');
+
+  // Ensure a tab is selected as soon as the modal opens (no extra click)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // If caller passed a preferred tab and it has data, honor it
+    const preferred = activeTab ?? 'all';
+    const tabHasData =
+      (preferred === 'all' && allCount > 0) ||
+      (preferred === 'sql' && hasSQL) ||
+      (preferred === 'embedding' && hasEmbedding) ||
+      (preferred === 'web' && hasWeb);
+
+    if (tabHasData) {
+      setSelectedTab(preferred);
+      return;
+    }
+
+    // Otherwise pick the first available in this priority
+    if (hasSQL && hasEmbedding) setSelectedTab('all');
+    else if (hasSQL) setSelectedTab('sql');
+    else if (hasEmbedding) setSelectedTab('embedding');
+    else if (hasWeb) setSelectedTab('web');
+    else setSelectedTab('all');
+  }, [isOpen, activeTab, hasSQL, hasEmbedding, hasWeb, allCount]);
+
+  // Build the dataset for the active tab
+  const currentData: NormalizedResult[] = useMemo(() => {
+    switch (selectedTab) {
+      case 'sql':
+        return sqlData;
+      case 'embedding':
+        return embData;
+      case 'web':
+        return webData;
+      case 'all':
+      default:
+        // show SQL + Embedding together in “All”
+        return [...sqlData, ...embData];
+    }
+  }, [selectedTab, sqlData, embData, webData]);
+
+  // Try to surface the SQL query (if present)
+  const sqlQuery = useMemo(() => {
+    if (selectedTab !== 'sql') return null;
+    for (const r of sqlData) {
+      if (r.record?.query) return r.record.query;
+      if (r.record?.sql) return r.record.sql;
     }
     return null;
-  };
+  }, [selectedTab, sqlData]);
 
-  // Get data for current tab
-  const getCurrentTabData = () => {
-    switch (selectedTab) {
-      case 'all':
-        return [...(allResults.sql || []), ...(allResults.embedding || [])];
-      case 'sql':
-        return allResults.sql || [];
-      case 'embedding':
-        return allResults.embedding || [];
-      case 'web':
-        return allResults.web || [];
-      default:
-        return [];
-    }
-  };
-
-  const currentData = getCurrentTabData();
-  const sqlQuery = selectedTab === 'sql' ? getSqlQuery() : null;
-
-  // Build column list with smart fallback for embedding
+  // Build columns (prioritize common keys, but include everything)
   const columns = useMemo(() => {
     const set = new Set<string>();
+    currentData.forEach((r) => Object.keys(r.record || {}).forEach((k) => set.add(k)));
 
-    currentData.forEach((r) => {
-      Object.keys(r.record || {}).forEach((k) => set.add(k));
-    });
-
-    const seed = ["table", "title", "content", "snippet", "name", "device_name", "plan_name"];
-    seed.forEach((k) => set.add(k));
-
+    // seed + priority ordering
     const priority = [
-      "table",
-      "title",
-      "name",
-      "device_name",
-      "plan_name",
-      "content",
-      "snippet",
-      "primary_id",
-      "internal_id",
-      "product_id",
-      "amount",
-      "availability",
-      "brand",
-      "brand_name",
-      "description",
-      "device_type",
-      "is_new",
-      "timestamp",
+      'table',
+      'title',
+      'name',
+      'device_name',
+      'plan_name',
+      'content',
+      'snippet',
+      'primary_id',
+      'internal_id',
+      'product_id',
+      'amount',
+      'availability',
+      'brand',
+      'brand_name',
+      'description',
+      'device_type',
+      'is_new',
+      'timestamp',
     ];
 
-    if (selectedTab === "embedding" && set.size < 3) {
-      ["table", "title", "content"].forEach((k) => set.add(k));
+    // helpful fallbacks for embedding records that often only have title/content
+    if (selectedTab === 'embedding' || selectedTab === 'all') {
+      ['table', 'title', 'content', 'snippet'].forEach((k) => set.add(k));
     }
 
     const rest = Array.from(set).filter((k) => !priority.includes(k));
     return [...priority.filter((k) => set.has(k)), ...rest];
   }, [currentData, selectedTab]);
 
-  // Render value with fallbacks for embedding
   const renderCellValue = (r: NormalizedResult, key: string) => {
     let v = r.record?.[key];
 
-    if (v === undefined || v === null) {
-      if (key === "table") v = r.table ?? r.record?.table_name;
-      else if (key === "title")
-        v = r.title ?? r.record?.name ?? r.record?.device_name ?? r.record?.plan_name;
-      else if (key === "content" || key === "snippet")
-        v = r.record?.content ?? r.record?.snippet;
+    // smart fallbacks
+    if (v == null) {
+      if (key === 'table') v = r.table ?? r.record?.table_name;
+      else if (key === 'title') v = r.title ?? r.record?.name ?? r.record?.device_name ?? r.record?.plan_name;
+      else if (key === 'content' || key === 'snippet') v = r.record?.content ?? r.record?.snippet;
     }
 
-    if (v === undefined || v === null)
-      return <span className="text-muted-foreground italic">null</span>;
-
-    if (typeof v === "object")
-      return <code className="text-xs bg-muted px-1 py-0.5 rounded">{JSON.stringify(v)}</code>;
-
+    if (v == null) return <span className="text-muted-foreground italic">null</span>;
+    if (typeof v === 'object') return <code className="text-xs bg-muted px-1 py-0.5 rounded">{JSON.stringify(v)}</code>;
     return String(v);
   };
 
-  // Export CSV for current tab
   const exportCSV = () => {
     const rows = currentData.map((r) => r.record).filter(Boolean);
     if (rows.length === 0) {
       toast({
-        title: "No data to export",
-        description: "The current tab has no data to export.",
-        variant: "destructive",
+        title: 'No data to export',
+        description: 'The current tab has no data to export.',
+        variant: 'destructive',
       });
       return;
     }
-
-    const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+    const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
     const csvHeader = cols.join(',');
-    const csvRows = rows.map(row =>
-      cols.map(col => {
-        const value = row[col];
-        if (value === null || value === undefined) return '';
-        const str = typeof value === 'object' ? JSON.stringify(value) : String(value);
-        if (str.includes(',') || str.includes('"') || str.includes('\n'))
-          return `"${str.replace(/"/g, '""')}"`;
-        return str;
-      }).join(',')
+    const csvRows = rows.map((row) =>
+      cols
+        .map((col) => {
+          const value = row[col];
+          if (value == null) return '';
+          const s = typeof value === 'object' ? JSON.stringify(value) : String(value);
+          return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+        })
+        .join(',')
     );
-
     const csv = [csvHeader, ...csvRows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${selectedTab}-results-${Date.now()}.csv`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${selectedTab}-results-${Date.now()}.csv`;
+    a.click();
     URL.revokeObjectURL(url);
-
-    toast({
-      title: "CSV exported",
-      description: `${selectedTab} results have been exported as CSV`,
-    });
+    toast({ title: 'CSV exported', description: `${selectedTab} results have been exported as CSV` });
   };
 
-  const renderTableResults = () => {
+  const renderTable = () => {
     if (currentData.length === 0) {
       return (
         <Card className="p-4">
@@ -172,7 +194,7 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
 
     return (
       <div className="space-y-4">
-        {sqlQuery && selectedTab === 'sql' && <SqlQueryDisplay query={sqlQuery} />}
+        {sqlQuery && <SqlQueryDisplay query={sqlQuery} />}
         <div className="overflow-auto max-h-[60vh]">
           <TableEnhancer>
             <table className="min-w-max w-full text-sm">
@@ -188,19 +210,14 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
                 </tr>
               </thead>
               <tbody className="[&>tr>td]:align-top">
-                {currentData.slice(0, 100).map((r, idx) => {
-                  const src = r.result_source;
-                  const score =
-                    typeof r.result_score === 'number'
-                      ? r.result_score
-                      : Number(r.result_score) || 0;
-
+                {currentData.slice(0, 100).map((r, i) => {
+                  const score = typeof r.result_score === 'number' ? r.result_score : Number(r.result_score) || 0;
                   return (
-                    <tr key={r.id ?? idx} className="border-b hover:bg-muted/50 whitespace-nowrap">
+                    <tr key={r.id ?? i} className="border-b hover:bg-muted/50 whitespace-nowrap">
                       {selectedTab === 'all' && (
                         <td className="p-2">
-                          <Badge variant={src === 'embedding' ? 'default' : 'secondary'}>
-                            {src === 'embedding' ? 'Embedding' : 'SQL'}
+                          <Badge variant={r.result_source === 'embedding' ? 'default' : 'secondary'}>
+                            {r.result_source === 'embedding' ? 'Embedding' : 'SQL'}
                           </Badge>
                         </td>
                       )}
@@ -221,23 +238,13 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
     );
   };
 
-  // Determine available tabs
-  const hasSQL = (allResults.sql || []).length > 0;
-  const hasEmbedding = (allResults.embedding || []).length > 0;
-  const hasWeb = (allResults.web || []).length > 0;
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-6xl max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <div className="flex items-center justify-between">
             <DialogTitle>{title}</DialogTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={exportCSV}
-              disabled={getCurrentTabData().length === 0}
-            >
+            <Button variant="outline" size="sm" onClick={exportCSV} disabled={currentData.length === 0}>
               <Download className="w-3 h-3 mr-1" />
               Export CSV
             </Button>
@@ -246,33 +253,54 @@ const ResultsModal: React.FC<ResultsModalProps> = ({
 
         <div className="flex-1 overflow-hidden">
           <Tabs value={selectedTab} onValueChange={setSelectedTab} className="h-full flex flex-col">
-            <TabsList className="flex-shrink-0 grid w-full grid-cols-4">
+            <TabsList
+              className={`flex-shrink-0 grid w-full ${
+                hasSQL && hasEmbedding && hasWeb
+                  ? 'grid-cols-4'
+                  : hasSQL && hasEmbedding
+                  ? 'grid-cols-3'
+                  : 'grid-cols-2'
+              }`}
+            >
               {(hasSQL || hasEmbedding) && (
                 <TabsTrigger value="all">
-                  All Results ({(allResults.sql || []).length + (allResults.embedding || []).length})
+                  All Results <Badge className="ml-2" variant="secondary">{allCount}</Badge>
                 </TabsTrigger>
               )}
-              {hasSQL && <TabsTrigger value="sql">SQL Results ({allResults.sql.length})</TabsTrigger>}
+              {hasSQL && (
+                <TabsTrigger value="sql">
+                  SQL Results <Badge className="ml-2" variant="secondary">{sqlCount}</Badge>
+                </TabsTrigger>
+              )}
               {hasEmbedding && (
-                <TabsTrigger value="embedding">Embedding Results ({allResults.embedding.length})</TabsTrigger>
+                <TabsTrigger value="embedding">
+                  Embedding Results <Badge className="ml-2" variant="secondary">{embCount}</Badge>
+                </TabsTrigger>
               )}
               {hasWeb && (
-                <TabsTrigger value="web">Web Results ({allResults.web.length})</TabsTrigger>
+                <TabsTrigger value="web">
+                  Web Results <Badge className="ml-2" variant="secondary">{webCount}</Badge>
+                </TabsTrigger>
               )}
             </TabsList>
 
             <div className="flex-1 overflow-hidden">
               <TabsContent value="all" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
+                {renderTable()}
               </TabsContent>
               <TabsContent value="sql" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
+                {renderTable()}
               </TabsContent>
               <TabsContent value="embedding" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {renderTableResults()}
+                {renderTable()}
               </TabsContent>
               <TabsContent value="web" className="h-full overflow-y-auto max-h-[65vh] p-1">
-                {/* Keep your renderWebResults if needed */}
+                {/* (You can render your web card view here if you want) */}
+                {webCount === 0 ? (
+                  <Card className="p-4"><p>No web results available.</p></Card>
+                ) : (
+                  renderTable()
+                )}
               </TabsContent>
             </div>
           </Tabs>
