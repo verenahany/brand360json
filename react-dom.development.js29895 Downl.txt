@@ -1,1463 +1,414 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/auth/AuthContext";
-import { apiClient } from "@/api/gen/client";
-import {
-  ChatMessage,
-  MilestoneState,
-  SSEStreamParser,
-  getContextAwareTip,
-} from "@/types/chat";
-import { StreamEvent } from "@/api/gen/types";
-import { ChatSession } from "@/api/gen/types";
-import { NormalizedResult } from "@/components/results/types";
-import ChatThread from "./ChatThread";
-import MessageComposer from "./MessageComposer";
-import EnhancedResultsPanel from "@/components/results/EnhancedResultsPanel";
-import ResultsModal from "./ResultsModal";
+import React, { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Plus,
-  MessageCircle,
-  Star,
-  Archive,
-  Trash2,
-  Settings,
-  LogOut,
-  MoreVertical,
-  Edit2,
-  Search,
-  AlertTriangle,
+  Eye,
+  X,
+  Search as SearchIcon,
+  Database,
   Globe,
+  Filter,
+  SortAsc,
   Download,
-  ExternalLink,
-  Copy,
-  Check,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import brandLogo from "@/assets/brand360.svg";
+import { NormalizedResult, ResultTab, SortOption, ResultCounts } from "./types";
+import ResultDetailModal from "./ResultDetailModal";
 
-// Normalize results to consistent format for both live and historical messages
+interface EnhancedResultsPanelProps {
+  isVisible: boolean;
+  onClose: () => void;
+  resultData: any;
+  resultType?: string;
+  onViewDetails?: (result: NormalizedResult) => void;
+  onExportData?: (results: NormalizedResult[]) => void;
+}
 
-const normalizeResults = (
-  results: any[],
-  type: "sql" | "web" | "embedding"
-): NormalizedResult[] => {
-  if (!Array.isArray(results)) return [];
+const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
+  isVisible,
+  onClose,
+  resultData,
+  resultType,
+  onViewDetails,
+  onExportData,
+}) => {
+  const [activeTab, setActiveTab] = useState<ResultTab>("sql");
+  const [filter, setFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<SortOption>("relevance");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedResult, setSelectedResult] = useState<NormalizedResult | null>(
+    null
+  );
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
-  return results.flatMap((item: any, index: number) => {
+  const determineSourceType = (record: any): "sql" | "embedding" | "web" => {
+    if (record?.type === "web" || record?.url) return "web";
+    if (typeof record?.result_score === "number" && record.result_score > 0)
+      return "embedding";
+    return "sql";
+  };
+
+  const processResultItem = (item: any, sourceType?: string): NormalizedResult[] => {
     if (!item) return [];
 
-    if (type === "web") {
-      // ---- PATCHED: Handle multiple legacy shapes ----
-
-      // 1. New: Array of results
-
-      if (Array.isArray(item.results)) {
-        return item.results.map((result: any, idx: number) => ({
-          id: `web-${index}-${idx}`,
-
-          result_source: "web",
-
-          result_score: result.result_score || 0,
-
-          title: result.title || "Untitled",
-
-          url: result.url || "",
-
-          record: {
-            snippet: result.content || result.snippet || "",
-
-            content: result.content || result.snippet || "",
-
-            source: result.url
-              ? result.url.startsWith("http")
-                ? new URL(result.url).hostname
-                : result.url
-              : "unknown",
-
-            ...result,
-          },
-
-          timestamp: result.timestamp || new Date().toISOString(),
-        }));
-      }
-
-      // 2. PATCH: Single object
-      else if (item.results && typeof item.results === "object") {
-        return [
-          {
-            id: `web-${index}-0`,
-
-            result_source: "web",
-
-            result_score: item.results.result_score || 0,
-
-            title: item.results.title || "Untitled",
-
-            url: item.results.url || "",
-
-            record: {
-              snippet: item.results.content || item.results.snippet || "",
-
-              content: item.results.content || item.results.snippet || "",
-
-              source: item.results.url
-                ? item.results.url.startsWith("http")
-                  ? new URL(item.results.url).hostname
-                  : item.results.url
-                : "unknown",
-
-              ...item.results,
-            },
-
-            timestamp: item.results.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      // 3. Flat: direct web result object
-      else if (item.url || item.title) {
-        return [
-          {
-            id: `web-${index}`,
-
-            result_source: "web",
-
-            result_score: item.result_score || 0,
-
-            title: item.title || "Untitled",
-
-            url: item.url || "",
-
-            record: {
-              snippet: item.content || item.snippet || "",
-
-              content: item.content || item.snippet || "",
-
-              source: item.url
-                ? item.url.startsWith("http")
-                  ? new URL(item.url).hostname
-                  : item.url
-                : "unknown",
-
-              ...item,
-            },
-
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      return [];
-    } else {
-      // ---- SQL / Embedding logic ----
-
-      if (Array.isArray(item.results)) {
-        return item.results.map((record: any, idx: number) => ({
-          id: `${type}-${index}-${idx}`,
-
-          result_source: record.result_source || type,
-
-          result_score: record.result_score || 0,
-
-          table: item.table || record.table || "Database Results",
-
-          query: item.query || record.query || "",
-
-          title:
-            record.name ||
-            record.device_name ||
-            record.plan_name ||
-            record.title ||
-            item.table ||
-            "Record",
-
-          record,
-
-          timestamp: record.timestamp || new Date().toISOString(),
-        }));
-      } else if (
-        item.table ||
-        item.query ||
-        item.name ||
-        item.device_name ||
-        item.plan_name ||
-        Object.keys(item).length > 2
-      ) {
-        return [
-          {
-            id: `${type}-${index}`,
-
-            result_source: item.result_source || type,
-
-            result_score: item.result_score || 0,
-
-            table: item.table || "Database Results",
-
-            query: item.query || "",
-
-            title:
-              item.name ||
-              item.device_name ||
-              item.plan_name ||
-              item.title ||
-              item.table ||
-              "Record",
-
-            record: item,
-
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-
-      return [];
+    if (Array.isArray(item)) {
+      return item.flatMap((subItem) => processResultItem(subItem, sourceType));
     }
-  });
-};
 
-const Chat: React.FC = () => {
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [currentMilestone, setCurrentMilestone] = useState<
-    MilestoneState | undefined
-  >();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+    if (item.results && Array.isArray(item.results)) {
+      return item.results.map((record: any, index: number) => ({
+        id: record.id || record.internal_id || `${item.table || "result"}-${index}`,
+        result_source: (record.result_source ||
+          sourceType ||
+          determineSourceType(record)) as NormalizedResult["result_source"],
+        result_score: Number(record.result_score ?? 0),
+        table: item.table || record.table,
+        type: record.type || sourceType,
+        title: record.title || record.name || record.device_name,
+        record: record,
+        url: record.url || record.link,
+        timestamp: record.timestamp || record.created_at,
+      }));
+    }
 
-  // Session management
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [showSessionsPanel, setShowSessionsPanel] = useState(true);
-  const [isRenamingSession, setIsRenamingSession] = useState<{
-    active: boolean;
-    id: string | null;
-    title: string;
-  }>({
-    active: false,
-    id: null,
-    title: "",
-  });
-  const [favoriteSessionIds, setFavoriteSessionIds] = useState<string[]>([]);
-  const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>([]);
-  const [activeFolder, setActiveFolder] = useState<
-    "all" | "favorites" | "archived"
-  >("all");
-
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // Results panel
-  const [showResultsPanel, setShowResultsPanel] = useState(false);
-  const [resultsPanelData, setResultsPanelData] = useState<any>(null);
-  const [resultsPanelType, setResultsPanelType] = useState<string>("");
-
-  // Modal states
-  const [showModal, setShowModal] = useState(false);
-  const [selectedResultData, setSelectedResultData] = useState<any>(null);
-  const [selectedResultType, setSelectedResultType] = useState<string | null>(null);
-
-  // Session warning
-  const [sessionWarning, setSessionWarning] = useState({
-    show: false,
-    countdown: 0,
-  });
-
-  // Handle viewing full results - now opens modal instead of side panel
-  const handleViewFullResults = (type: "web" | "sql" | "embedding", results: {sql: any[], web: any[], embedding: any[]}) => {
-    // Use the specific results passed from the individual message
-    setSelectedResultType(type);
-    setSelectedResultData(results);
-    setShowModal(true);
+    return [
+      {
+        id: item.id || item.internal_id || `result-${Math.random()}`,
+        result_source: (item.result_source ||
+          sourceType ||
+          determineSourceType(item)) as NormalizedResult["result_source"],
+        result_score: Number(item.result_score ?? 0),
+        table: item.table,
+        type: item.type || sourceType,
+        title: item.title || item.name || item.device_name,
+        record: item,
+        url: item.url || item.link,
+        timestamp: item.timestamp || item.created_at,
+      },
+    ];
   };
 
-
-  // Refs and utilities
-  const streamParserRef = useRef(new SSEStreamParser());
-  const currentInteractionIdRef = useRef<string | null>(null);
-  const { currentUser, logout } = useAuth();
-  const { toast } = useToast();
-
-  // Load sessions on mount
-  useEffect(() => {
-    loadSessions();
-    loadFavoritesAndArchived();
-  }, []);
-
-  // Load favorites and archived from localStorage
-  const loadFavoritesAndArchived = () => {
-    try {
-      const storedFavorites = localStorage.getItem("favoriteSessionIds");
-      if (storedFavorites) {
-        setFavoriteSessionIds(JSON.parse(storedFavorites));
-      }
-
-      const storedArchived = localStorage.getItem("archivedSessionIds");
-      if (storedArchived) {
-        setArchivedSessionIds(JSON.parse(storedArchived));
-      }
-    } catch (error) {
-      console.error("Failed to load favorites/archived:", error);
-    }
+  const formatTableType = (tableName: string): string => {
+    if (!tableName) return "Unknown";
+    return tableName
+      .replace(/([A-Z])/g, " $1")
+      .replace(/_/g, " ")
+      .replace(/^combined\s+/i, "")
+      .trim()
+      .replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
-  // Load sessions from API
-  const loadSessions = async () => {
-    try {
-      console.log("Loading sessions...");
-      const sessionsData = await apiClient.getSessions();
-      console.log("Sessions loaded:", sessionsData);
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error("Failed to load sessions:", error);
-      toast({
-        title: "Failed to load sessions",
-        description: "Could not load your conversation history",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Create new session
-  const createNewSession = async (showToast: boolean = true) => {
-    if (!currentUser) return;
-
-    try {
-      const newSession = await apiClient.createSession({
-        user_id: currentUser.id,
-        title: "New Conversation",
-      });
-
-      setSessionId(newSession.session_id);
-      setMessages([]);
-      await loadSessions();
-
-      if (showToast) {
-        toast({
-          title: "New conversation started",
-          description: "You can start chatting now",
-        });
-      }
-
-      return newSession.session_id;
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      if (showToast) {
-        toast({
-          title: "Failed to create session",
-          description: "Could not start a new conversation",
-          variant: "destructive",
-        });
-      }
-      return null;
-    }
-  };
-
-  // Load session messages
-  const loadSession = async (session: ChatSession) => {
-    try {
-      console.log("Loading session:", session.session_id);
-      console.log(
-        "API URL will be:",
-        `/api/sessions/${session.session_id}/messages`
-      );
-      setSessionId(session.session_id);
-
-      const messagesData = await apiClient.getSessionMessages(
-        session.session_id
-      );
-      console.log("Session messages loaded:", messagesData);
-      console.log("Messages count:", messagesData.length);
-      console.log("Message structure (first):", messagesData[0]); // Log first message structure
-
-      if (messagesData.length === 0) {
-        console.warn("No messages found for session:", session.session_id);
-        console.log("Session details:", session);
-
-        // Try debug endpoint to see what's in the database
-        try {
-          const debugData = await apiClient.debugSessionMessages(
-            session.session_id
-          );
-          console.log("Debug data for session:", debugData);
-        } catch (debugError) {
-          console.error("Debug endpoint failed:", debugError);
-        }
-      }
-
-      const formattedMessages: ChatMessage[] = messagesData.map(
-        (msg, index) => {
-          // Clean content by removing ALL result blocks and formatting tokens
-          let cleanContent = msg.content || "";
-
-          // Comprehensive cleaning - remove all known markers and tokens
-          cleanContent = cleanContent
-            // Bot type and control markers
-            .replace(/\[BOT_TYPE:[^\]]*\]/g, "")
-            .replace(/\[DONE\]/g, "")
-            .replace(/\[START\]/g, "")
-            .replace(/\[END\]/g, "")
-            .replace(/\[MILESTONE:[^\]]*\]/g, "")
-            // Result blocks with various ending formats
-            .replace(/\[SQL_RESULTS\][\s\S]*?\[\/END_SQL_RESULTS\]/g, "")
-            .replace(/\[WEB_RESULTS\][\s\S]*?\[\/END_WEB_RESULTS\]/g, "")
-            .replace(
-              /\[EMBEDDING_RESULTS\][\s\S]*?\[\/END_EMBEDDING_RESULTS\]/g,
-              ""
-            )
-            .replace(/\[SQL_RESULTS\][\s\S]*?\[END_SQL_RESULTS\]/g, "")
-            .replace(/\[WEB_RESULTS\][\s\S]*?\[END_WEB_RESULTS\]/g, "")
-            .replace(
-              /\[EMBEDDING_RESULTS\][\s\S]*?\[END_EMBEDDING_RESULTS\]/g,
-              ""
-            )
-            // Any remaining square bracket control markers
-            .replace(/\[[A-Z_]+:[^\]]*\]/g, "")
-            .replace(/\[[A-Z_]+\]/g, "")
-            .replace(/^```(?:\w+)?\n([\s\S]*?)\n```$/g, "$1")
-            // Clean up extra whitespace and newlines
-            .replace(/\n\s*\n\s*\n/g, "\n\n") // Reduce multiple newlines to double
-
-            .trim();
-
-          // --- Normalization Fix ---
-          let sender: "user" | "assistant" | "system";
-          if (msg.sender === "bot") {
-            sender = "assistant";
-          } else if (msg.sender === "user") {
-            sender = "user";
-          } else if (msg.sender === "system") {
-            sender = "system";
-          } else {
-            sender = "assistant"; // fallback, just in case
-          }
-
-          // Normalize results exactly like live messages to ensure consistent structure
-          const normalizedSqlResults = normalizeResults(
-            msg.sql_results || [],
-            "sql"
-          );
-          const normalizedWebResults = normalizeResults(
-            msg.web_results || [],
-            "web"
-          );
-
-          console.log(`Message ${index} normalized results:`, {
-            sql: normalizedSqlResults.length,
-            web: normalizedWebResults.length,
-            originalSql: msg.sql_results?.length || 0,
-            originalWeb: msg.web_results?.length || 0,
-            sqlSample: normalizedSqlResults[0],
-            webSample: normalizedWebResults[0],
-            originalSqlSample: msg.sql_results?.[0],
-            originalWebSample: msg.web_results?.[0],
-          });
-
-          return {
-            id: msg.message_id || `msg-${index}`,
-            sender, // <--- FIXED!
-            content: cleanContent,
-            timestamp: new Date(msg.timestamp || Date.now()),
-            sqlResults: normalizedSqlResults,
-            webResults: normalizedWebResults,
-            embeddingResults: [],
-            isStreaming: false,
-          };
-        }
-      );
-
-      // Set results panel data if there are any results in the loaded messages
-      // Collect all results from all messages to populate the results panel
-      const allSqlResults = messagesData.flatMap((msg) =>
-        normalizeResults(msg.sql_results || [], "sql")
-      );
-      const allWebResults = messagesData.flatMap((msg) =>
-        normalizeResults(msg.web_results || [], "web")
-      );
-
-      const allResults = {
-        sql: allSqlResults,
-        web: allWebResults,
-        embedding: [], // Backend doesn't store embedding results separately yet
+  const { normalizedResults, counts, availableFilters } = useMemo(() => {
+    if (!resultData) {
+      return {
+        normalizedResults: [] as NormalizedResult[],
+        counts: { sql: 0, embedding: 0, web: 0, total: 0 } as ResultCounts & { total: number },
+        availableFilters: [] as string[],
       };
+    }
 
-      // Auto-open results panel if we have any results (like live messages do)
-      if (allResults.sql.length > 0 || allResults.web.length > 0) {
-        setResultsPanelData(allResults);
-        // Prioritize web results if available, otherwise SQL
-        setResultsPanelType(allResults.web.length > 0 ? "web" : "sql");
-        setShowResultsPanel(true);
+    let normalized: NormalizedResult[] = [];
+    const filters = new Set<string>();
+
+    try {
+      if (Array.isArray(resultData)) {
+        normalized = resultData.flatMap((item) => processResultItem(item));
+      } else if (typeof resultData === "object") {
+        if (resultData.sql) normalized.push(...processResultItem(resultData.sql, "sql"));
+        if (resultData.embedding) normalized.push(...processResultItem(resultData.embedding, "embedding"));
+        if (resultData.web) normalized.push(...processResultItem(resultData.web, "web"));
+      }
+
+      normalized.forEach((result) => {
+        if (result.table) filters.add(formatTableType(result.table));
+      });
+
+      const sqlCount = normalized.filter((r) => r.result_source === "sql").length;
+      const embeddingCount = normalized.filter((r) => r.result_source === "embedding").length;
+      const webCount = normalized.filter((r) => r.result_source === "web").length;
+
+      return {
+        normalizedResults: normalized,
+        counts: { sql: sqlCount, embedding: embeddingCount, web: webCount, total: normalized.length },
+        availableFilters: Array.from(filters),
+      };
+    } catch (e) {
+      console.error("Error processing results:", e);
+      return {
+        normalizedResults: [],
+        counts: { sql: 0, embedding: 0, web: 0, total: 0 },
+        availableFilters: [],
+      };
+    }
+  }, [resultData]);
+
+  useEffect(() => {
+    if (resultType === "web" && counts.web > 0) setActiveTab("web");
+    else if (counts.sql > 0) setActiveTab("sql");
+    else if (counts.embedding > 0) setActiveTab("embedding");
+  }, [resultType, counts]);
+
+  const getDisplayName = (result: NormalizedResult): string => {
+    if (result.title) return result.title;
+    const record = result.record || {};
+    const nameFields = ["name", "device_name", "plan_name", "question", "title"];
+    for (const f of nameFields) if (record[f]) return record[f];
+    return `${result.result_source} Result`;
+  };
+
+  const getFilteredResults = useMemo(() => {
+    return (tabType: ResultTab) => {
+      let filtered = normalizedResults.filter((r) => r.result_source === tabType);
+
+      if (filter !== "all") {
+        filtered = filtered.filter((r) => formatTableType(r.table || "") === filter);
+      }
+
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        filtered = filtered.filter((r) => {
+          const searchableText = [
+            r.title,
+            r.record?.name,
+            r.record?.device_name,
+            r.record?.plan_name,
+            r.record?.question,
+            JSON.stringify(r.record ?? {}),
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          return searchableText.includes(q);
+        });
+      }
+
+      if (sortBy === "name") {
+        filtered.sort((a, b) => getDisplayName(a).toLowerCase().localeCompare(getDisplayName(b).toLowerCase()));
+      } else if (sortBy === "timestamp") {
+        filtered.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
       } else {
-        // Close results panel if no results
-        setShowResultsPanel(false);
-        setResultsPanelData(null);
+        filtered.sort((a, b) => (b.result_score ?? 0) - (a.result_score ?? 0));
       }
 
-      setMessages(formattedMessages);
-
-      toast({
-        title: "Session loaded",
-        description: `Loaded ${formattedMessages.length} messages`,
-      });
-    } catch (error) {
-      console.error("Failed to load session:", error);
-      toast({
-        title: "Failed to load session",
-        description: "Could not load the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Send message and handle streaming response
-  const sendMessage = async (messageText: string, webSearch: boolean) => {
-    console.log("=== SEND MESSAGE CALLED ===", messageText);
-    if (!messageText.trim() || isProcessing) return;
-
-    let currentSessionId = sessionId;
-
-    // If no session, create one first
-    if (!currentSessionId) {
-      currentSessionId = await createNewSession(false);
-      if (!currentSessionId) return; // Failed to create session
-    }
-
-    // Check if this is the first message and update session title
-    const isFirstMessage = messages.length === 0;
-    if (isFirstMessage && currentSessionId) {
-      try {
-        // Update session title with first message (truncated)
-        const titleFromMessage =
-          messageText.length > 50
-            ? messageText.substring(0, 50) + "..."
-            : messageText;
-
-        await apiClient.updateSession(currentSessionId, titleFromMessage);
-        await loadSessions();
-      } catch (error) {
-        console.error("Failed to update session title:", error);
-      }
-    }
-
-    setIsProcessing(true);
-    setCurrentMilestone({
-      stage: "START",
-      tip: getContextAwareTip(messageText).content,
-    });
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: "user",
-      content: messageText,
-      timestamp: new Date(),
+      return filtered;
     };
+  }, [normalizedResults, filter, sortBy, searchQuery]);
 
-    // Add placeholder assistant message
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      sender: "assistant",
-      content: "",
-      timestamp: new Date(),
-      isStreaming: true,
-    };
+  const filteredResults = getFilteredResults(activeTab);
 
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
-    currentInteractionIdRef.current = assistantMessageId;
+  const handleViewDetails = (result: NormalizedResult) => {
+    setSelectedResult(result);
+    setShowDetailModal(true);
+    onViewDetails?.(result);
+  };
 
-    try {
-      console.log("Sending chat request:", {
-        query: messageText,
-        session_id: currentSessionId,
-        web_search_enabled: webSearch,
-      });
-      console.log("Expected API endpoint:", "/api/chat");
-
-      // Update sessionId state with current session
-      setSessionId(currentSessionId);
-
-      // --- Start streaming ---
-
-      const stream = await apiClient.chat({
-        query: messageText,
-
-        session_id: currentSessionId!,
-
-        web_search_enabled: webSearch,
-      });
-
-      const reader = stream.getReader();
-
-      const decoder = new TextDecoder();
-
-      let fullAssistantBuffer = ""; // <--- buffer for entire assistant response
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === currentInteractionIdRef.current
-                ? { ...m, isStreaming: false }
-                : m
-            )
-          );
-
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (!chunk.trim()) continue;
-
-        fullAssistantBuffer += chunk; // <--- collect
-
-        // ---- your event/stream logic (keep this) ----
-
-        const events = streamParserRef.current.parse(chunk);
-
-        if (events.length > 0) {
-          for (const event of events) {
-            switch (event.type) {
-              case "milestone":
-                setCurrentMilestone({
-                  stage: event.stage,
-
-                  tip: event.tip,
-
-                  message: event.message,
-                });
-
-                break;
-
-              case "token":
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-
-                          content: (m.content || "") + event.content,
-
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-
-                break;
-
-              case "results": {
-                const normalizedSql = normalizeResults(
-                  event.payload.sql || [],
-                  "sql"
-                );
-
-                const normalizedWeb = normalizeResults(
-                  event.payload.web || [],
-                  "web"
-                );
-
-                const normalizedEmbedding = normalizeResults(
-                  event.payload.embedding || [],
-                  "embedding"
-                );
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-
-                          sqlResults: normalizedSql,
-
-                          webResults: normalizedWeb,
-
-                          embeddingResults: normalizedEmbedding,
-
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-
-                setResultsPanelData({
-                  sql: normalizedSql,
-
-                  web: normalizedWeb,
-
-                  embedding: normalizedEmbedding,
-                });
-
-                setResultsPanelType(
-                  normalizedWeb.length > 0
-                    ? "web"
-                    : normalizedSql.length > 0
-                    ? "sql"
-                    : normalizedEmbedding.length > 0
-                    ? "embedding"
-                    : ""
-                );
-
-                setShowResultsPanel(true);
-
-                break;
-              }
-
-              case "final":
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-
-                          content: event.full_content_markdown ?? m.content,
-
-                          isStreaming: false,
-                        }
-                      : m
-                  )
-                );
-
-                break;
-
-              case "meta":
-                if (event.session_title && currentSessionId) {
-                  setSessions((prev) =>
-                    prev.map((session) =>
-                      session.session_id === currentSessionId
-                        ? { ...session, title: event.session_title! }
-                        : session
-                    )
-                  );
-                }
-
-                break;
-
-              case "error":
-                toast({
-                  title: "Stream error",
-
-                  description: event.message,
-
-                  variant: "destructive",
-                });
-
-                break;
-            }
-          }
-        } else {
-          // Fallback: treat as raw text token
-
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === currentInteractionIdRef.current
-                ? {
-                    ...m,
-
-                    content: (m.content || "") + chunk,
-
-                    isStreaming: true,
-                  }
-                : m
-            )
-          );
-        }
-      }
-
-      // PATCH last assistant message (this block, keep just ONCE)
-      setMessages((prev) => {
-        const lastAssistantIdx = (() => {
-          for (let i = prev.length - 1; i >= 0; i--) {
-            if (prev[i].sender === "assistant") return i;
-          }
-          return -1;
-        })();
-        if (lastAssistantIdx === -1) return prev;
-
-        let sqlResults = [];
-        let webResults = [];
-
-        const sqlMatch = fullAssistantBuffer.match(
-          /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
-        );
-        if (sqlMatch) {
-          try {
-            const sqlJson = JSON.parse(sqlMatch[1]);
-            sqlResults = normalizeResults(sqlJson, "sql");
-          } catch {}
-        }
-        const webMatch = fullAssistantBuffer.match(
-          /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
-        );
-        if (webMatch) {
-          try {
-            const webJson = JSON.parse(webMatch[1]);
-            webResults = normalizeResults(webJson, "web");
-          } catch {}
-        }
-        return prev.map((m, idx) =>
-          idx === lastAssistantIdx ? { ...m, sqlResults, webResults } : m
-        );
-      });
-
-      // NOW, re-extract those results from the buffer for the panel
-      let sqlResults = [];
-      let webResults = [];
-      const sqlMatch = fullAssistantBuffer.match(
-        /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
-      );
-      if (sqlMatch) {
-        try {
-          const sqlJson = JSON.parse(sqlMatch[1]);
-          sqlResults = normalizeResults(sqlJson, "sql");
-        } catch {}
-      }
-      const webMatch = fullAssistantBuffer.match(
-        /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
-      );
-      if (webMatch) {
-        try {
-          const webJson = JSON.parse(webMatch[1]);
-          webResults = normalizeResults(webJson, "web");
-        } catch {}
-      }
-      if (sqlResults.length > 0 || webResults.length > 0) {
-        setResultsPanelData({
-          sql: sqlResults,
-          web: webResults,
-          embedding: [],
-        });
-        setResultsPanelType(webResults.length > 0 ? "web" : "sql");
-        setShowResultsPanel(true);
-      }
-
-      // Finalize the assistant message
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === currentInteractionIdRef.current
-            ? { ...msg, isStreaming: false }
-            : msg
-        )
-      );
-
-      console.log(
-        "Chat interaction completed - messages should be persisted by backend"
-      );
-    } catch (error) {
-      console.error("Chat error:", error);
-
-      // Update assistant message with error
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === currentInteractionIdRef.current
-            ? {
-                ...msg,
-                content:
-                  "Sorry, I encountered an error processing your request. Please try again.",
-                isStreaming: false,
-              }
-            : msg
-        )
-      );
-
-      toast({
-        title: "Message failed",
-        description: "There was an error sending your message",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
-      setCurrentMilestone(undefined);
-      currentInteractionIdRef.current = null;
-      streamParserRef.current.reset();
+  const getTabIcon = (tab: ResultTab) => {
+    switch (tab) {
+      case "sql":
+        return Database;
+      case "embedding":
+        return SearchIcon;
+      case "web":
+        return Globe;
     }
   };
 
-  // Handle streaming events
-  const handleStreamEvent = async (
-    event: StreamEvent,
-    messageId: string,
-    currentContent: string
-  ) => {
-    switch (event.type) {
-      case "milestone":
-        setCurrentMilestone({
-          stage: event.stage,
-          tip: event.tip,
-          message: event.message,
-        });
-        break;
-
-      case "token":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: currentContent + event.content }
-              : msg
-          )
-        );
-        break;
-
-      case "results":
-        if (event.payload) {
-          setResultsPanelData(event.payload);
-          setResultsPanelType("sql"); // Default to SQL tab
-          setShowResultsPanel(true);
-        }
-        break;
-
-      case "final":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? {
-                  ...msg,
-                  content: event.full_content_markdown,
-                  isStreaming: false,
-                }
-              : msg
-          )
-        );
-        break;
-
-      case "meta":
-        if (event.session_title && sessionId) {
-          // Update session title
-          setSessions((prev) =>
-            prev.map((session) =>
-              session.session_id === sessionId
-                ? { ...session, title: event.session_title! }
-                : session
-            )
-          );
-        }
-        break;
-
-      case "error":
-        console.error("Stream error:", event.message);
-        toast({
-          title: "Stream error",
-          description: event.message,
-          variant: "destructive",
-        });
-        break;
-    }
-  };
-
-  // Session management functions
-  const startRenameSession = (session: ChatSession) => {
-    setIsRenamingSession({
-      active: true,
-      id: session.session_id,
-      title: session.title,
-    });
-  };
-
-  const confirmRenameSession = async () => {
-    if (!isRenamingSession.id || !isRenamingSession.title.trim()) return;
-
-    try {
-      await apiClient.updateSession(
-        isRenamingSession.id,
-        isRenamingSession.title.trim()
-      );
-      await loadSessions();
-      setIsRenamingSession({ active: false, id: null, title: "" });
-
-      toast({
-        title: "Session renamed",
-        description: "Conversation title has been updated",
-      });
-    } catch (error) {
-      console.error("Failed to rename session:", error);
-      toast({
-        title: "Rename failed",
-        description: "Could not update the conversation title",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const deleteSession = async (sessionToDelete: ChatSession) => {
-    try {
-      await apiClient.deleteSession(sessionToDelete.session_id);
-
-      // If it's the current session, clear it
-      if (sessionId === sessionToDelete.session_id) {
-        setSessionId(null);
-        setMessages([]);
-      }
-
-      await loadSessions();
-
-      toast({
-        title: "Session deleted",
-        description: "Conversation has been removed",
-      });
-    } catch (error) {
-      console.error("Failed to delete session:", error);
-      toast({
-        title: "Delete failed",
-        description: "Could not delete the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-      toast({
-        title: "Logged out",
-        description: "You have been successfully logged out",
-      });
-    } catch (error) {
-      console.error("Logout error:", error);
-      toast({
-        title: "Logout failed",
-        description: "There was an error logging out",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Toggle favorite status for a session
-  const toggleFavoriteSession = (sessionId: string) => {
-    setFavoriteSessionIds((prevIds) => {
-      const newIds = prevIds.includes(sessionId)
-        ? prevIds.filter((id) => id !== sessionId)
-        : [...prevIds, sessionId];
-
-      try {
-        localStorage.setItem("favoriteSessionIds", JSON.stringify(newIds));
-      } catch (error) {
-        console.error("Failed to store favorites:", error);
-      }
-
-      return newIds;
-    });
-  };
-
-  // Toggle archive status for a session
-  const toggleArchiveSession = (sessionId: string) => {
-    setArchivedSessionIds((prevIds) => {
-      const newIds = prevIds.includes(sessionId)
-        ? prevIds.filter((id) => id !== sessionId)
-        : [...prevIds, sessionId];
-
-      try {
-        localStorage.setItem("archivedSessionIds", JSON.stringify(newIds));
-      } catch (error) {
-        console.error("Failed to store archived:", error);
-      }
-
-      return newIds;
-    });
-  };
-
-  // Filter sessions based on active folder
-  const filteredSessions = sessions.filter((session) => {
-    const matchesSearch = session.title
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const isArchived = archivedSessionIds.includes(session.session_id);
-    const isFavorite = favoriteSessionIds.includes(session.session_id);
-
-    if (activeFolder === "all") {
-      return matchesSearch && !isArchived;
-    } else if (activeFolder === "favorites") {
-      return matchesSearch && isFavorite && !isArchived;
-    } else if (activeFolder === "archived") {
-      return matchesSearch && isArchived;
-    }
-
-    return false;
-  });
+  if (!isVisible) return null;
 
   return (
-    <SidebarProvider className="h-screen overflow-hidden">
-      <div className="h-screen flex w-full overflow-hidden">
-        {/* Sidebar with flex column to pin user info to bottom */}
-        <Sidebar className="border-r flex flex-col">
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Logo Header */}
-            <div className="p-4 border-b flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 flex items-center justify-center">
-                  <img src={brandLogo} alt="Brand360" className="h-6 w-auto" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm">Brand360.ai</p>
-                  <p className="text-xs text-muted-foreground">AI Assistant</p>
-                </div>
-              </div>
-            </div>
-
-            {/* New Conversation */}
-            <div className="p-4 border-b flex-shrink-0">
-              <Button
-                onClick={() => createNewSession()}
-                variant="outline"
-                className="w-full"
-                size="sm"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Chat
-              </Button>
-            </div>
-
-            {/* Search */}
-            <div className="p-4 border-b flex-shrink-0">
-              <Input
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
-            </div>
-
-            {/* Folders with counts */}
-            <SidebarGroup className="px-2 flex-shrink-0">
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "all"}
-                      onClick={() => setActiveFolder("all")}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      <span>All</span>
-                      <Badge variant="secondary" className="ml-auto">
-                        {sessions.filter(s => !archivedSessionIds.includes(s.session_id)).length}
-                      </Badge>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "favorites"}
-                      onClick={() => setActiveFolder("favorites")}
-                    >
-                      <Star className="w-4 h-4" />
-                      <span>Favorites</span>
-                      <Badge variant="secondary" className="ml-auto">
-                        {favoriteSessionIds.filter(id => !archivedSessionIds.includes(id)).length}
-                      </Badge>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={activeFolder === "archived"}
-                      onClick={() => setActiveFolder("archived")}
-                    >
-                      <Archive className="w-4 h-4" />
-                      <span>Archived</span>
-                      <Badge variant="secondary" className="ml-auto">
-                        {archivedSessionIds.length}
-                      </Badge>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            {/* Sessions - scrollable */}
-            <div className="flex-1 overflow-y-auto">
-              <SidebarGroup>
-                <SidebarGroupLabel>Recent Conversations</SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {filteredSessions.map((session) => (
-                      <SidebarMenuItem key={session.session_id}>
-                        <div className="flex items-center gap-1 w-full">
-                          <SidebarMenuButton
-                            isActive={sessionId === session.session_id}
-                            className="flex-1"
-                          >
-                            <button
-                              onClick={() => loadSession(session)}
-                              className="flex items-center gap-2 w-full"
-                            >
-                              <MessageCircle className="w-4 h-4" />
-                              <span className="truncate">
-                                {isRenamingSession.active &&
-                                isRenamingSession.id === session.session_id ? (
-                                  <Input
-                                    value={isRenamingSession.title}
-                                    onChange={(e) =>
-                                      setIsRenamingSession((prev) => ({
-                                        ...prev,
-                                        title: e.target.value,
-                                      }))
-                                    }
-                                    onBlur={confirmRenameSession}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter")
-                                        confirmRenameSession();
-                                      if (e.key === "Escape")
-                                        setIsRenamingSession({
-                                          active: false,
-                                          id: null,
-                                          title: "",
-                                        });
-                                    }}
-                                    className="h-6 text-xs"
-                                    autoFocus
-                                  />
-                                ) : (
-                                  session.title
-                                )}
-                              </span>
-                            </button>
-                          </SidebarMenuButton>
-
-                          {/* Session Actions */}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="w-6 h-6"
-                              >
-                                <MoreVertical className="w-3 h-3" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              className="w-48 z-50 bg-popover border shadow-md"
-                            >
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  toggleFavoriteSession(session.session_id)
-                                }
-                              >
-                                <Star
-                                  className={cn(
-                                    "w-3 h-3 mr-2",
-                                    favoriteSessionIds.includes(
-                                      session.session_id
-                                    ) && "fill-current"
-                                  )}
-                                />
-                                {favoriteSessionIds.includes(session.session_id)
-                                  ? "Unfavorite"
-                                  : "Add to favorites"}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => startRenameSession(session)}
-                              >
-                                <Edit2 className="w-3 h-3 mr-2" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  toggleArchiveSession(session.session_id)
-                                }
-                              >
-                                <Archive className="w-3 h-3 mr-2" />
-                                {archivedSessionIds.includes(session.session_id)
-                                  ? "Unarchive"
-                                  : "Archive"}
-                              </DropdownMenuItem>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <DropdownMenuItem
-                                    onSelect={(e) => e.preventDefault()}
-                                    className="text-destructive focus:text-destructive"
-                                  >
-                                    <Trash2 className="w-3 h-3 mr-2" />
-                                    Delete
-                                  </DropdownMenuItem>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete Conversation</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      Are you sure you want to delete this conversation? This action cannot be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      onClick={() => deleteSession(session)}
-                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                    >
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </div>
-          </div>
-
-          {/* User Info pinned to bottom */}
-          <div className="p-4 border-t flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
-                <span className="text-xs font-medium">
-                  {currentUser?.name?.charAt(0).toUpperCase() || "U"}
-                </span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">
-                  {currentUser?.name}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {currentUser?.email}
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={handleLogout}>
-                <LogOut className="w-4 h-4" />
+    <>
+      <div className="flex flex-col h-full">
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Results Panel</h2>
+            <div className="flex items-center gap-2">
+              {onExportData && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onExportData(filteredResults)}
+                  className="h-8"
+                >
+                  <Download className="w-4 h-4 mr-2 text-brand-red" />
+                  Export
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
+                <X className="w-4 h-4 text-brand-red" />
               </Button>
             </div>
           </div>
-        </Sidebar>
-
-        {/* Main Content Area */}
-        <div className="flex-1 flex h-screen overflow-hidden">
-          {/* Chat Section */}
-          <div className={cn("flex flex-col transition-all duration-300 overflow-hidden", showResultsPanel ? "flex-1" : "w-full")}>
-            {/* Fixed Header at Top */}
-            <header className="h-16 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex items-center px-4 flex-shrink-0 z-10">
-              <SidebarTrigger />
-              <div className="flex-1 flex items-center justify-between ml-4">
-                <div>
-                  <h1 className="text-lg font-semibold">Brand360.ai Chat</h1>
-                  {sessionId && (
-                    <p className="text-sm text-muted-foreground">
-                      Current session:{" "}
-                      {sessions.find((s) => s.session_id === sessionId)?.title ||
-                        "Unknown"}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {/* Session Warning */}
-                  {sessionWarning.show && (
-                    <div className="flex items-center gap-2 px-3 py-1 bg-warning/10 text-warning rounded-md">
-                      <AlertTriangle className="w-4 h-4" />
-                      <span className="text-sm">
-                        Session expires in {sessionWarning.countdown}s
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Results Panel Toggle */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowResultsPanel(!showResultsPanel)}
-                    className={cn(showResultsPanel && "bg-accent")}
-                  >
-                    <Search className="w-4 h-4 mr-2" />
-                    Results
-                    
-                  </Button>
-                </div>
-              </div>
-            </header>
-
-            {/* Messages area - independently scrollable */}
-            <div className="flex-1 overflow-y-auto">
-              <ChatThread
-                messages={messages}
-                currentMilestone={currentMilestone}
-                onViewFullResults={handleViewFullResults}
-              />
-            </div>
-            
-            {/* Fixed input at bottom */}
-            <div className="flex-shrink-0 border-t bg-background">
-              <MessageComposer
-                onSendMessage={sendMessage}
-                onInputFocus={() => {
-                  // Start new session when clicking input if no session exists
-                  if (!sessionId && messages.length === 0) {
-                    createNewSession(false);
-                  }
-                }}
-                isLoading={isProcessing}
-                webSearchEnabled={webSearchEnabled}
-                onWebSearchToggle={setWebSearchEnabled}
-              />
-            </div>
-          </div>
-
-          {/* Results Panel - Full height from top */}
-          {showResultsPanel && (
-            <div className="w-96 border-l bg-background flex-shrink-0 h-full overflow-hidden">
-              <EnhancedResultsPanel
-                isVisible={showResultsPanel}
-                onClose={() => setShowResultsPanel(false)}
-                resultData={resultsPanelData}
-                resultType={resultsPanelType}
-              />
-            </div>
-          )}
         </div>
 
-        {/* Results Modal */}
-        <ResultsModal
-          isOpen={showModal}
-          onClose={() => setShowModal(false)}
-          title={selectedResultData ? `${selectedResultType === 'embedding' ? 'Internal Knowledge' : selectedResultType.charAt(0).toUpperCase() + selectedResultType.slice(1)} Results` : 'Results'}
-          allResults={selectedResultData || { sql: [], embedding: [], web: [] }}
-          activeTab={selectedResultType as 'sql' | 'embedding' | 'web'}
-        />
+        {/* Content */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ResultTab)} className="flex flex-col h-full">
+            {/* Tabs */}
+            <TabsList className="grid w-full grid-cols-3 mx-6 mt-4 flex-shrink-0">
+              {(["sql", "embedding", "web"] as ResultTab[]).map((tab) => {
+                const Icon = getTabIcon(tab);
+                const count = counts[tab];
+
+                return (
+                  <TabsTrigger key={tab} value={tab} className="flex items-center gap-2">
+                    <Icon className="w-3 h-3 text-brand-red" />
+                    <span className="capitalize">{tab}</span>
+                    {count > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {count}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+
+            {/* Controls */}
+            <div className="px-6 pt-4 pb-4 border-b flex-shrink-0 space-y-3">
+              <div className="relative">
+                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-red" />
+                <Input
+                  placeholder="Search results..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-10 w-full pl-9"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Select value={filter} onValueChange={setFilter}>
+                  <SelectTrigger className="w-40 h-9">
+                    <Filter className="w-3 h-3 mr-1 text-brand-red" />
+                    <SelectValue placeholder="All Types" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {availableFilters.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {opt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+                  <SelectTrigger className="w-40 h-9">
+                    <SortAsc className="w-3 h-3 mr-1 text-brand-red" />
+                    <SelectValue placeholder="Relevance" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="relevance">Relevance</SelectItem>
+                    {/* <SelectItem value="name">Name</SelectItem> */}
+                    <SelectItem value="timestamp">Date</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Results */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+              {(["sql", "embedding", "web"] as ResultTab[]).map((tab) => {
+                const tabResults = getFilteredResults(tab);
+
+                return (
+                  <TabsContent key={tab} value={tab} className="mt-0 space-y-3 h-full">
+                    {tabResults.length === 0 ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-muted/50 flex items-center justify-center">
+                          <SearchIcon className="w-5 h-5" />
+                        </div>
+                        <p>No {tab} results found</p>
+                        {searchQuery && <p className="text-sm">Try adjusting your search or filters</p>}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {tabResults.map((result) => (
+                          <Card
+                            key={result.id}
+                            className="p-4 hover:shadow-md transition-shadow cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring/50 "
+                            onClick={() => handleViewDetails(result)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                handleViewDetails(result);
+                              }
+                            }}
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-sm truncate">{getDisplayName(result)}</h4>
+                                  {result.table && (
+                                    <p className="text-xs text-muted-foreground">{formatTableType(result.table)}</p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 ml-2">
+                                  {/* Show score badge except for SQL */}
+                                  {result.result_source !== "sql" && (result.result_score ?? 0) > 0 && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {Number(result.result_score).toFixed(2)}
+                                    </Badge>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleViewDetails(result);
+                                    }}
+                                  >
+                                    <Eye className="w-3 h-3 text-brand-red" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {/* Preview content (safe) */}
+                              <div className="text-xs text-muted-foreground">
+                                {Object.entries(result.record ?? {})
+                                  .slice(0, 2)
+                                  .map(([key, value]) => (
+                                    <div key={key}>
+                                      <span className="font-medium">{key.replace(/_/g, " ")}:</span>{" "}
+                                      {typeof value === "string"
+                                        ? `${value.substring(0, 50)}${value.length > 50 ? "..." : ""}`
+                                        : JSON.stringify(value).substring(0, 50)}
+                                      {JSON.stringify(value).length > 50 && "..."}
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                );
+              })}
+            </div>
+          </Tabs>
+        </div>
       </div>
-    </SidebarProvider>
+
+      {/* Detail Modal */}
+      <ResultDetailModal
+        result={selectedResult}
+        isOpen={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+      />
+    </>
   );
 };
 
-export default Chat;
+export default EnhancedResultsPanel;
