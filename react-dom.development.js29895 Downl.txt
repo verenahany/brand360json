@@ -1,313 +1,392 @@
-import React, { useState, useMemo } from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { Copy, Download, ExternalLink, Check } from 'lucide-react';
-import { NormalizedResult, ViewMode } from './types';
-import { useToast } from '@/hooks/use-toast';
+import React, { useEffect, useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { NormalizedResult } from "@/components/results/types";
+import TableEnhancer from "@/components/tables/TableEnhancer";
+import SqlQueryDisplay from "./SqlQueryDisplay";
+import { Globe, ExternalLink, Copy, Download } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
-interface ResultDetailModalProps {
-  result: NormalizedResult | null;
+interface ResultsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  title: string;
+  allResults: {
+    sql: NormalizedResult[];
+    embedding: NormalizedResult[];
+    web: NormalizedResult[];
+  };
+  activeTab: "sql" | "embedding" | "web" | "all";
 }
 
-const ResultDetailModal: React.FC<ResultDetailModalProps> = ({
-  result,
+const ResultsModal: React.FC<ResultsModalProps> = ({
   isOpen,
   onClose,
+  title,
+  allResults,
+  activeTab,
 }) => {
-  const [viewMode, setViewMode] = useState<ViewMode>('formatted');
-  const [copiedJson, setCopiedJson] = useState(false);
   const { toast } = useToast();
 
-  if (!result) return null;
+  // 1) Normalize buckets in case the caller mixed sources into sql
+  const normalized = useMemo(() => {
+    const inputSQL = allResults.sql ?? [];
+    const inputEMB = allResults.embedding ?? [];
+    const inputWEB = allResults.web ?? [];
 
-  const isSQL = (result.result_source || '').toLowerCase() === 'sql';
+    const fromSqlEmb = inputSQL.filter((r) => r.result_source === "embedding");
+    const pureSql = inputSQL.filter((r) => r.result_source !== "embedding");
 
-  const safeString = (val: unknown) => {
-    if (val === null || val === undefined) return 'null';
-    if (typeof val === 'string') return val;
-    // Pretty stringify objects/arrays; keep single-line short values short
-    try {
-      const s = JSON.stringify(val);
-      return s.length > 120 ? JSON.stringify(val, null, 2) : s;
-    } catch {
-      return String(val);
+    return {
+      sql: pureSql,
+      embedding: [...inputEMB, ...fromSqlEmb],
+      web: inputWEB,
+    };
+  }, [allResults]);
+
+  const sqlData = normalized.sql;
+  const embData = normalized.embedding;
+  const webData = normalized.web;
+
+  const sqlCount = sqlData.length;
+  const embCount = embData.length;
+  const webCount = webData.length;
+  const allCount = sqlCount + embCount;
+
+  const hasSQL = sqlCount > 0;
+  const hasEmbedding = embCount > 0;
+  const hasWeb = webCount > 0;
+
+  // 2) Selected tab (auto-pick on open)
+  const [selectedTab, setSelectedTab] = useState<string>("all");
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const preferred = activeTab ?? "all";
+    const ok =
+      (preferred === "all" && allCount > 0) ||
+      (preferred === "sql" && hasSQL) ||
+      (preferred === "embedding" && hasEmbedding) ||
+      (preferred === "web" && hasWeb);
+
+    if (ok) {
+      setSelectedTab(preferred);
+    } else if (hasSQL && hasEmbedding) {
+      setSelectedTab("all");
+    } else if (hasSQL) {
+      setSelectedTab("sql");
+    } else if (hasEmbedding) {
+      setSelectedTab("embedding");
+    } else if (hasWeb) {
+      setSelectedTab("web");
+    } else {
+      setSelectedTab("all");
     }
-  };
+  }, [isOpen, activeTab, hasSQL, hasEmbedding, hasWeb, allCount]);
 
-  const flattenObject = (obj: any, prefix = ''): Record<string, any> => {
-    const out: Record<string, any> = {};
-    if (!obj || typeof obj !== 'object') return out;
+  // 3) Data for the active tab
+  const currentData: NormalizedResult[] = useMemo(() => {
+    switch (selectedTab) {
+      case "sql":
+        return sqlData;
+      case "embedding":
+        return embData;
+      case "web":
+        return webData;
+      case "all":
+      default:
+        return [...sqlData, ...embData];
+    }
+  }, [selectedTab, sqlData, embData, webData]);
 
-    for (const key of Object.keys(obj)) {
-      const val = obj[key];
-      const newKey = prefix ? `${prefix}.${key}` : key;
+  // Helpers
+  const isRowSQL = (r: NormalizedResult) => (r.result_source || "").toLowerCase() === "sql";
 
-      if (Array.isArray(val)) {
-        out[newKey] = val; // keep arrays as arrays; display via safeString
-      } else if (val && typeof val === 'object') {
-        Object.assign(out, flattenObject(val, newKey));
-      } else {
-        out[newKey] = val;
+  // Should we show the Score column in the table UI for this tab?
+  // - SQL tab: never show score
+  // - All tab: show score only if at least one row is non-SQL
+  // - Embedding/Web tabs: show as usual
+  const showScoreColumnInUI = useMemo(() => {
+    if (selectedTab === "sql") return false;
+    if (selectedTab === "all") return currentData.some((r) => !isRowSQL(r));
+    if (selectedTab === "embedding") return true;
+    if (selectedTab === "web") return true;
+    return true;
+  }, [selectedTab, currentData]);
+
+  // 4) SQL query preview (only for SQL tab)
+  const sqlQuery = useMemo(() => {
+    if (selectedTab !== "sql") return null;
+    for (const r of sqlData) {
+      if (r.record?.query) return r.record.query;
+      if (r.record?.sql) return r.record.sql;
+    }
+    return null;
+  }, [selectedTab, sqlData]);
+
+  // 5) Columns (union) with sensible order
+  const columns = useMemo(() => {
+    const set = new Set<string>();
+    currentData.forEach((r) => Object.keys(r.record || {}).forEach((k) => set.add(k)));
+
+    const priority = [
+      "table",
+      "title",
+      "name",
+      "device_name",
+      "plan_name",
+      "question",
+      "primary_id",
+      "internal_id",
+      "product_id",
+      "amount",
+      "availability",
+      "brand",
+      "brand_name",
+      "description",
+      "device_type",
+      "is_new",
+      "timestamp",
+      "content",
+      "snippet",
+    ];
+    const rest = Array.from(set).filter((k) => !priority.includes(k));
+    return [...priority.filter((k) => set.has(k)), ...rest];
+  }, [currentData]);
+
+  // 6) CSV export (omit score column entirely for SQL tab; blank score for SQL rows in All tab)
+  const exportCSV = () => {
+    if (currentData.length === 0) {
+      toast({
+        title: "No data to export",
+        description: "The current tab has no data to export.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const includeScoreCol =
+      selectedTab !== "sql" && (selectedTab !== "all" || currentData.some((r) => !isRowSQL(r)));
+
+    const header = includeScoreCol
+      ? ["result_source", "result_score", ...columns]
+      : ["result_source", ...columns];
+
+    const rows = currentData.map((r) => {
+      const baseCells = columns.map((c) => {
+        const v = r.record?.[c];
+        const s = v == null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      });
+
+      if (!includeScoreCol) {
+        return [r.result_source ?? "", ...baseCells].join(",");
       }
-    }
-    return out;
+
+      // include score col, but leave empty for SQL rows
+      const scoreCell =
+        isRowSQL(r)
+          ? ""
+          : (typeof r.result_score === "number" || !isNaN(Number(r.result_score)))
+            ? String(r.result_score)
+            : "";
+
+      const safeScore = /[",\n]/.test(scoreCell) ? `"${scoreCell.replace(/"/g, '""')}"` : scoreCell;
+
+      return [r.result_source ?? "", safeScore, ...baseCells].join(",");
+    });
+
+    const csv = [header.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedTab}-results-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "CSV exported", description: "Download started." });
   };
 
-  const rawJson = useMemo(() => result, [result]);
-
-  // All Fields is derived directly from raw JSON for parity (except hiding score for SQL)
-  const flattenedAll = useMemo(() => {
-    const flat = flattenObject(rawJson);
-    if (isSQL) {
-      // Hide only the score field when source is SQL
-      if ('result_score' in flat) delete flat['result_score'];
-    }
-    return flat;
-  }, [rawJson, isSQL]);
-
-  const handleCopyJson = async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(rawJson, null, 2));
-      setCopiedJson(true);
-      toast({
-        title: 'JSON copied',
-        description: 'Result data has been copied to clipboard',
-      });
-      setTimeout(() => setCopiedJson(false), 2000);
-    } catch (error) {
-      toast({
-        title: 'Copy failed',
-        description: 'Failed to copy JSON data',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleExportCsv = () => {
-    try {
-      const flatData = flattenObject(result.record || {});
-      const headers = Object.keys(flatData);
-      const values = Object.values(flatData);
-
-      const csvContent = [
-        headers.join(','),
-        values.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','),
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `result-${result.id}-${Date.now()}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: 'CSV exported',
-        description: 'Result data has been exported as CSV',
-      });
-    } catch (error) {
-      toast({
-        title: 'Export failed',
-        description: 'Failed to export CSV data',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleOpenLink = () => {
-    if (result.url) window.open(result.url, '_blank', 'noopener,noreferrer');
-  };
-
-  const renderFormattedView = () => {
-    const record = result.record || {};
+  // 7) Web results (unchanged)
+  const renderWebResults = () => {
+    if (webCount === 0) return <Card className="p-4"><p>No web results available.</p></Card>;
     return (
-      <div className="space-y-4">
-        {/* Header Info */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">{getDisplayTitle(result)}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant="outline">{result.result_source}</Badge>
-              {result.table && (
-                <Badge variant="secondary">{formatTableName(result.table)}</Badge>
-              )}
-              {/* Show score only when not SQL and result_score > 0 */}
-              {!isSQL && result.result_score > 0 && (
-                <Badge variant="outline">
-                  Score: {Number(result.result_score).toFixed(2)}
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
+      <div className="overflow-auto max-h-[60vh]">
+        {webData.map((result, i) => {
+          const record = result.record || {};
+          const title = record.title || result.title || "No title";
+          const url = record.url || result.url || "";
+          const content = record.content || record.snippet || "No content";
+          const score = result.result_score || 0;
 
-        {/* Record fields (from raw record, 1:1) */}
-        <div className="grid gap-3">
-          {Object.entries(record).map(([key, value]) => {
-            if (key === 'id' || key === 'table') return null;
-            const rendered =
-              typeof value === 'string' && value.length > 240
-                ? value
-                : safeString(value);
+          let domain = "Unknown source";
+          try { if (url) domain = new URL(url).hostname.replace(/^www\./, ""); } catch {}
 
-            const isMultiline =
-              typeof rendered === 'string' && rendered.includes('\n');
-
-            return (
-              <div key={key} className="grid grid-cols-3 gap-2">
-                <dt className="text-sm font-medium text-muted-foreground capitalize break-words">
-                  {key.replace(/_/g, ' ')}
-                </dt>
-                <dd className="col-span-2 text-sm break-words">
-                  {isMultiline ? (
-                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap sidebar-scroll-modern p-2 bg-muted/50 rounded">
-                      {rendered}
-                    </pre>
-                  ) : (
-                    <span className="block">{rendered}</span>
-                  )}
-                </dd>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  const renderAllFieldsView = () => {
-    return (
-      <div className="space-y-2">
-        {Object.entries(flattenedAll).map(([key, value]) => {
-          // Also guard in case upstream adds aliases of score
-          if (isSQL && key.endsWith('result_score')) return null;
-          const rendered = safeString(value);
-          const isMultiline =
-            typeof rendered === 'string' && rendered.includes('\n');
           return (
-            <div
-              key={key}
-              className="grid grid-cols-3 gap-2 py-1 border-b border-border/50"
-            >
-              <dt className="text-sm font-medium text-muted-foreground break-words">
-                {key}
-              </dt>
-              <dd className="col-span-2 text-sm break-words">
-                {isMultiline ? (
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap sidebar-scroll-modern">
-                    {rendered}
-                  </pre>
-                ) : (
-                  rendered
-                )}
-              </dd>
-            </div>
+            <Card key={i} className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Globe className="w-4 h-4" />
+                  <span>{domain}</span>
+                </div>
+                {score > 0 && <Badge variant="secondary">{(score * 100).toFixed(1)}% match</Badge>}
+              </div>
+              <h4 className="font-semibold mb-2">
+                {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{title}</a> : title}
+              </h4>
+              {url && (
+                <div className="flex items-center gap-2 mb-2 text-sm">
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:underline truncate">{url}</a>
+                  <Button variant="ghost" size="sm" onClick={() => navigator.clipboard.writeText(url)} className="p-1 h-auto" title="Copy URL">
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground mb-3">{content}</p>
+              {url && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="w-3 h-3 mr-1" />
+                    Visit Website
+                  </a>
+                </Button>
+              )}
+            </Card>
           );
         })}
       </div>
     );
   };
 
-  const renderRawView = () => {
+  const renderTableResults = () => {
+    if (currentData.length === 0) {
+      const label =
+        selectedTab === "sql" ? "SQL" : selectedTab === "embedding" ? "Embedding" : "result";
+      return <Card className="p-4"><p>No {label} data available.</p></Card>;
+    }
+
     return (
-      <pre className="text-xs bg-muted p-4 rounded-md overflow-auto max-h-96 sidebar-scroll-modern">
-        {JSON.stringify(rawJson, null, 2)}
-      </pre>
+      <div className="space-y-4">
+        {selectedTab === "sql" && sqlQuery && <SqlQueryDisplay query={sqlQuery} />}
+        <div className="overflow-auto max-h-[60vh]">
+          <TableEnhancer>
+            <table className="min-w-max w-full text-sm">
+              <thead className="sticky top-0 bg-muted z-10">
+                <tr className="border-b">
+                  {selectedTab === "all" && <th className="p-2 text-left">Source</th>}
+                  {showScoreColumnInUI && <th className="p-2 text-left">Score</th>}
+                  {columns.map((c) => (
+                    <th key={c} className="p-2 text-left font-medium" title={c}>{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="[&>tr>td]:align-top">
+                {currentData.slice(0, 100).map((r, idx) => (
+                  <tr key={r.id ?? idx} className="border-b hover:bg-muted/50 whitespace-nowrap">
+                    {selectedTab === "all" && (
+                      <td className="p-2">
+                        <Badge variant={r.result_source === "embedding" ? "default" : "secondary"}>
+                          {r.result_source === "embedding" ? "Embedding" : "SQL"}
+                        </Badge>
+                      </td>
+                    )}
+                    {showScoreColumnInUI && (
+                      <td className="p-2">
+                        {/* Blank for SQL rows; value for non-SQL */}
+                        {!isRowSQL(r) && (typeof r.result_score === "number" || !isNaN(Number(r.result_score)))
+                          ? Number(r.result_score).toFixed(4)
+                          : "—"}
+                      </td>
+                    )}
+                    {columns.map((c) => {
+                      const v = r.record?.[c];
+                      return (
+                        <td key={c} className="p-2">
+                          {v == null ? (
+                            <span className="text-muted-foreground italic">null</span>
+                          ) : typeof v === "object" ? (
+                            <code className="text-xs bg-muted px-1 py-0.5 rounded">{JSON.stringify(v)}</code>
+                          ) : (
+                            String(v)
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableEnhancer>
+        </div>
+        {currentData.length > 100 && (
+          <Card className="p-3">
+            <p className="text-sm text-muted-foreground">Showing first 100 rows of {currentData.length} total.</p>
+          </Card>
+        )}
+      </div>
     );
   };
 
-  const getDisplayTitle = (r: NormalizedResult): string => {
-    if (r.title) return r.title;
-    const record = r.record || {};
-    const titleFields = ['name', 'title', 'device_name', 'plan_name', 'question'];
-    for (const field of titleFields) {
-      if (record[field]) return String(record[field]);
-    }
-    return `${r.result_source} Result`;
-  };
-
-  const formatTableName = (tableName: string): string =>
-    tableName
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/_/g, ' ')
-      .trim()
-      .replace(/\b\w/g, (l) => l.toUpperCase());
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-6xl max-h-[85vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>Result Details</span>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleCopyJson}
-                disabled={copiedJson}
-              >
-                {copiedJson ? (
-                  <>
-                    <Check className="w-3 h-3 mr-1" />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3 h-3 mr-1" />
-                    Copy JSON
-                  </>
-                )}
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleExportCsv}>
-                <Download className="w-3 h-3 mr-1" />
-                Export CSV
-              </Button>
-              {result.url && (
-                <Button size="sm" variant="outline" onClick={handleOpenLink}>
-                  <ExternalLink className="w-3 h-3 mr-1" />
-                  Open Link
-                </Button>
-              )}
-            </div>
-          </DialogTitle>
+      <DialogContent className="max-w-6xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <div className="flex items-center justify-between">
+            <DialogTitle>{title}</DialogTitle>
+            <Button variant="outline" size="sm" onClick={exportCSV} disabled={currentData.length === 0}>
+              <Download className="w-3 h-3 mr-1" />
+              Export CSV
+            </Button>
+          </div>
         </DialogHeader>
 
-        <Tabs
-          value={viewMode}
-          onValueChange={(v) => setViewMode(v as ViewMode)}
-          className="flex-1 overflow-hidden"
-        >
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="formatted">Formatted</TabsTrigger>
-            <TabsTrigger value="all">All Fields</TabsTrigger>
-            <TabsTrigger value="raw">Raw JSON</TabsTrigger>
-          </TabsList>
+        <div className="flex-1 overflow-hidden">
+          <Tabs value={selectedTab} onValueChange={setSelectedTab} className="h-full flex flex-col">
+            <TabsList className="flex-shrink-0 grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1">
+              {(hasSQL || hasEmbedding) && (
+                <TabsTrigger value="all" className="whitespace-nowrap">
+                  All Results <Badge className="ml-1" variant="secondary">{allCount}</Badge>
+                </TabsTrigger>
+              )}
+              {hasSQL && (
+                <TabsTrigger value="sql" className="whitespace-nowrap">
+                  SQL <Badge className="ml-1" variant="secondary">{sqlCount}</Badge>
+                </TabsTrigger>
+              )}
+              {hasEmbedding && (
+                <TabsTrigger value="embedding" className="whitespace-nowrap">
+                  Embedding <Badge className="ml-1" variant="secondary">{embCount}</Badge>
+                </TabsTrigger>
+              )}
+              {hasWeb && (
+                <TabsTrigger value="web" className="whitespace-nowrap">
+                  Web <Badge className="ml-1" variant="secondary">{webCount}</Badge>
+                </TabsTrigger>
+              )}
+            </TabsList>
 
-          <div className="mt-4 overflow-y-auto flex-1 sidebar-scroll-modern">
-            <TabsContent value="formatted" className="mt-0">
-              {renderFormattedView()}
-            </TabsContent>
-            <TabsContent value="all" className="mt-0">
-              {renderAllFieldsView()}
-            </TabsContent>
-            <TabsContent value="raw" className="mt-0">
-              {renderRawView()}
-            </TabsContent>
-          </div>
-        </Tabs>
+            <div className="flex-1 overflow-hidden">
+              <TabsContent value="all" className="h-full overflow-y-auto p-1 data-[state=active]:flex data-[state=active]:flex-col">
+                {renderTableResults()}
+              </TabsContent>
+              <TabsContent value="sql" className="h-full overflow-y-auto p-1 data-[state=active]:flex data-[state=active]:flex-col">
+                {renderTableResults()}
+              </TabsContent>
+              <TabsContent value="embedding" className="h-full overflow-y-auto p-1 data-[state=active]:flex data-[state=active]:flex-col">
+                {renderTableResults()}
+              </TabsContent>
+              <TabsContent value="web" className="h-full overflow-y-auto p-1 data-[state=active]:flex data-[state=active]:flex-col">
+                {renderWebResults()}
+              </TabsContent>
+            </div>
+          </Tabs>
+        </div>
       </DialogContent>
     </Dialog>
   );
 };
 
-export default ResultDetailModal;
+export default ResultsModal;
