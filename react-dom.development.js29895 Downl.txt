@@ -48,58 +48,28 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedResult, setSelectedResult] = useState<NormalizedResult | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-
-  // Scope: "latest" vs "all"
   const [scope, setScope] = useState<"latest" | "all">("latest");
 
-  // ---------- Helpers (declare BEFORE any hook that uses them) ----------
-  const determineSourceType = (record: any): "sql" | "embedding" | "web" => {
+  // ---------- Helpers ----------
+  const toArray = (v: any): any[] =>
+    v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+
+  const tail1 = (arr: any[]) => (arr.length ? [arr[arr.length - 1]] : []);
+
+  const looksNormalized = (x: any) =>
+    x && typeof x === "object" && "id" in x && "result_source" in x;
+
+  const determineSourceType = (record: any): ResultTab => {
+    if (!record) return "sql";
+    if (record.result_source && ["sql", "web", "embedding"].includes(record.result_source))
+      return record.result_source as ResultTab;
     if (record?.type === "web" || record?.url) return "web";
     if (typeof record?.result_score === "number" && record.result_score > 0) return "embedding";
     return "sql";
   };
 
-  const processResultItem = (item: any, sourceType?: string): NormalizedResult[] => {
-    if (!item) return [];
-
-    // Arrays of items
-    if (Array.isArray(item)) {
-      return item.flatMap((subItem) => processResultItem(subItem, sourceType));
-    }
-
-    // Objects with .results arrays
-    if (item.results && Array.isArray(item.results)) {
-      return item.results.map((record: any, index: number) => ({
-        id: record.id || record.internal_id || `${item.table || "result"}-${index}`,
-        result_source: record.result_source || (sourceType as any) || determineSourceType(record),
-        result_score: record.result_score || 0,
-        table: item.table || record.table,
-        type: record.type || sourceType,
-        title: record.title || record.name || record.device_name,
-        record,
-        url: record.url || record.link,
-        timestamp: record.timestamp || record.created_at,
-      }));
-    }
-
-    // Single object case
-    return [
-      {
-        id: item.id || item.internal_id || `result-${Math.random()}`,
-        result_source: item.result_source || (sourceType as any) || determineSourceType(item),
-        result_score: item.result_score || 0,
-        table: item.table,
-        type: item.type || sourceType,
-        title: item.title || item.name || item.device_name,
-        record: item,
-        url: item.url || item.link,
-        timestamp: item.timestamp || item.created_at,
-      },
-    ];
-  };
-
   const formatTableType = (tableName?: string): string => {
-    if (!tableName) return "Unknown";
+    if (!tableName) return "Other";
     return tableName
       .replace(/([A-Z])/g, " $1")
       .replace(/_/g, " ")
@@ -128,83 +98,156 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
     }
   };
 
-  // Extract the "latest response" payload when scope === "latest"
-  const extractLatestPayload = (data: any): any => {
-    if (!data) return data;
-    if (Array.isArray(data)) {
-      return data.length ? extractLatestPayload(data[data.length - 1]) : data;
+  const coerceToNormalized = (item: any, fallbackSource: ResultTab): NormalizedResult[] => {
+    if (!item) return [];
+
+    // Already normalized
+    if (looksNormalized(item)) {
+      const r = item as NormalizedResult;
+      // Ensure result_source exists and is one of the tabs
+      const rs: ResultTab = ["sql", "web", "embedding"].includes(
+        String(r.result_source)
+      )
+        ? (r.result_source as ResultTab)
+        : fallbackSource;
+      return [{ ...r, result_source: rs }];
     }
-    const candidateKeys = ["responses", "history", "turns", "items", "entries", "chunks", "results"];
-    for (const key of candidateKeys) {
-      const v = data?.[key];
-      if (Array.isArray(v) && v.length) return extractLatestPayload(v[v.length - 1]);
+
+    // If it's a list of items
+    if (Array.isArray(item)) {
+      return item.flatMap((x) => coerceToNormalized(x, fallbackSource));
     }
-    return data; // assume it’s the final payload
+
+    // Raw shape that may contain a nested .results array
+    if (item.results && Array.isArray(item.results)) {
+      return item.results.map((record: any, idx: number) => {
+        const rs: ResultTab = determineSourceType(record) || fallbackSource;
+        return {
+          id: record.id || record.internal_id || `${item.table || "result"}-${idx}`,
+          result_source: rs,
+          result_score: record.result_score || 0,
+          table: item.table || record.table,
+          title: record.title || record.name || record.device_name,
+          record,
+          url: record.url || record.link,
+          timestamp: record.timestamp || record.created_at,
+        };
+      });
+    }
+
+    // Single raw object → normalize
+    const rs: ResultTab = determineSourceType(item) || fallbackSource;
+    return [
+      {
+        id: item.id || item.internal_id || `result-${Math.random()}`,
+        result_source: rs,
+        result_score: item.result_score || 0,
+        table: item.table,
+        title: item.title || item.name || item.device_name,
+        record: item,
+        url: item.url || item.link,
+        timestamp: item.timestamp || item.created_at,
+      },
+    ];
   };
 
-  // ---------- Scope the incoming data ----------
-  const scopedData = useMemo(
-    () => (scope === "latest" ? extractLatestPayload(resultData) : resultData),
-    [scope, resultData]
+  // Pull the last payload from nested histories if present
+  const extractLatestPayload = (data: any): any => {
+    if (!data) return data;
+    if (Array.isArray(data)) return data.length ? extractLatestPayload(data[data.length - 1]) : data;
+    const keys = ["responses", "history", "turns", "items", "entries", "chunks", "results"];
+    for (const k of keys) {
+      const v = data?.[k];
+      if (Array.isArray(v) && v.length) return extractLatestPayload(v[v.length - 1]);
+    }
+    return data;
+  };
+
+  // Group any incoming shape into explicit buckets
+  const groupIntoBuckets = (data: any): { sql: any[]; web: any[]; embedding: any[] } => {
+    if (!data) return { sql: [], web: [], embedding: [] };
+
+    // Case 1: top-level buckets exist
+    if (typeof data === "object" && ("sql" in data || "web" in data || "embedding" in data)) {
+      return {
+        sql: toArray(data.sql),
+        web: toArray(data.web),
+        embedding: toArray(data.embedding),
+      };
+    }
+
+    // Case 2: array of mixed items
+    if (Array.isArray(data)) {
+      const sql: any[] = [];
+      const web: any[] = [];
+      const embedding: any[] = [];
+      for (const item of data) {
+        const rs = determineSourceType(item);
+        (rs === "sql" ? sql : rs === "web" ? web : embedding).push(item);
+      }
+      return { sql, web, embedding };
+    }
+
+    // Case 3: single object (decide its bucket)
+    const rs = determineSourceType(data);
+    return {
+      sql: rs === "sql" ? [data] : [],
+      web: rs === "web" ? [data] : [],
+      embedding: rs === "embedding" ? [data] : [],
+    };
+  };
+
+  // ---------- Scope and normalize ----------
+  const normalizedByTab = useMemo(() => {
+    // Step 1: find the latest payload if the data is nested
+    const base = scope === "latest" ? extractLatestPayload(resultData) : resultData;
+
+    // Step 2: group into buckets
+    const grouped = groupIntoBuckets(base);
+
+    // Step 3: if scope is "latest", take only the last item per bucket
+    const scopedBuckets =
+      scope === "latest"
+        ? {
+            sql: tail1(grouped.sql),
+            web: tail1(grouped.web),
+            embedding: tail1(grouped.embedding),
+          }
+        : grouped;
+
+    // Step 4: normalize per bucket WITHOUT double-normalizing already-normalized inputs
+    const sql = coerceToNormalized(scopedBuckets.sql, "sql");
+    const web = coerceToNormalized(scopedBuckets.web, "web");
+    const embedding = coerceToNormalized(scopedBuckets.embedding, "embedding");
+
+    return { sql, web, embedding };
+  }, [resultData, scope]);
+
+  // Flattened results & counts
+  const normalizedResults: NormalizedResult[] = useMemo(
+    () => [...normalizedByTab.sql, ...normalizedByTab.web, ...normalizedByTab.embedding],
+    [normalizedByTab]
   );
 
-  // ---------- Normalize ----------
-  const {
-    normalizedResults,
-    counts,
-    availableFilters,
-  }: {
-    normalizedResults: NormalizedResult[];
-    counts: { sql: number; embedding: number; web: number; total: number };
-    availableFilters: string[];
-  } = useMemo(() => {
-    if (!scopedData) {
-      return {
-        normalizedResults: [],
-        counts: { sql: 0, embedding: 0, web: 0, total: 0 },
-        availableFilters: [],
-      };
-    }
+  const counts = useMemo(
+    () => ({
+      sql: normalizedByTab.sql.length,
+      web: normalizedByTab.web.length,
+      embedding: normalizedByTab.embedding.length,
+      total: normalizedByTab.sql.length + normalizedByTab.web.length + normalizedByTab.embedding.length,
+    }),
+    [normalizedByTab]
+  );
 
-    let normalized: NormalizedResult[] = [];
-    const filters = new Set<string>();
+  const availableFilters = useMemo(() => {
+    const set = new Set<string>();
+    normalizedResults.forEach((r) => set.add(formatTableType(r.table)));
+    // Remove the generic “Other” unless it’s the only thing we have
+    const arr = Array.from(set);
+    return arr.length > 1 ? arr.filter((x) => x !== "Other") : arr;
+  }, [normalizedResults]);
 
-    try {
-      if (Array.isArray(scopedData)) {
-        normalized = scopedData.flatMap((item) => processResultItem(item));
-      } else if (typeof scopedData === "object") {
-        if (scopedData.sql) normalized.push(...processResultItem(scopedData.sql, "sql"));
-        if (scopedData.embedding) normalized.push(...processResultItem(scopedData.embedding, "embedding"));
-        if (scopedData.web) normalized.push(...processResultItem(scopedData.web, "web"));
-
-        // If none of the above buckets exist but it still looks like a single result object
-        if (!scopedData.sql && !scopedData.embedding && !scopedData.web) {
-          normalized.push(...processResultItem(scopedData));
-        }
-      }
-
-      normalized.forEach((r) => r.table && filters.add(formatTableType(r.table)));
-
-      const sqlCount = normalized.filter((r) => r.result_source === "sql").length;
-      const embeddingCount = normalized.filter((r) => r.result_source === "embedding").length;
-      const webCount = normalized.filter((r) => r.result_source === "web").length;
-
-      return {
-        normalizedResults: normalized,
-        counts: { sql: sqlCount, embedding: embeddingCount, web: webCount, total: normalized.length },
-        availableFilters: Array.from(filters),
-      };
-    } catch (e) {
-      console.error("Error processing results:", e);
-      return {
-        normalizedResults: [],
-        counts: { sql: 0, embedding: 0, web: 0, total: 0 },
-        availableFilters: [],
-      };
-    }
-  }, [scopedData]);
-
-  // ---------- Auto-switch tab based on new results ----------
+  // ---------- Auto-switch tab ----------
   useEffect(() => {
     if (resultType === "web" && counts.web > 0) setActiveTab("web");
     else if (counts.sql > 0) setActiveTab("sql");
@@ -217,19 +260,20 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
       let filtered = normalizedResults.filter((r) => r.result_source === tabType);
 
       if (filter !== "all") {
-        filtered = filtered.filter((r) => formatTableType(r.table || "") === filter);
+        filtered = filtered.filter((r) => formatTableType(r.table) === filter);
       }
 
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         filtered = filtered.filter((r) => {
+          const rec = (r.record || {}) as any;
           const text = [
             r.title,
-            (r.record as any)?.name,
-            (r.record as any)?.device_name,
-            (r.record as any)?.plan_name,
-            (r.record as any)?.question,
-            JSON.stringify(r.record ?? {}),
+            rec?.name,
+            rec?.device_name,
+            rec?.plan_name,
+            rec?.question,
+            JSON.stringify(rec ?? {}),
           ]
             .join(" ")
             .toLowerCase();
@@ -244,15 +288,13 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
           (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
         );
       } else {
-        // relevance (score desc)
-        filtered.sort((a, b) => (b.result_score || 0) - (a.result_score || 0));
+        filtered.sort((a, b) => (Number(b.result_score) || 0) - (Number(a.result_score) || 0));
       }
 
       return filtered;
     };
   }, [normalizedResults, filter, sortBy, searchQuery]);
 
-  // ---------- Render guards ----------
   if (!isVisible) return null;
 
   const tabCounts: Record<ResultTab, number> = {
@@ -364,7 +406,7 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                   </SelectContent>
                 </Select>
 
-                {/* NEW: Scope */}
+                {/* Scope */}
                 <Select value={scope} onValueChange={(v) => setScope(v as "latest" | "all")}>
                   <SelectTrigger className="w-44 h-9">
                     <Globe className="w-3 h-3 mr-1 text-brand-red" />
@@ -400,13 +442,19 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                             <Card
                               key={result.id}
                               className="p-4 hover:shadow-md transition-shadow cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring/50"
-                              onClick={() => handleViewDetails(result)}
+                              onClick={() => {
+                                setSelectedResult(result);
+                                setShowDetailModal(true);
+                                onViewDetails?.(result);
+                              }}
                               role="button"
                               tabIndex={0}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter" || e.key === " ") {
                                   e.preventDefault();
-                                  handleViewDetails(result);
+                                  setSelectedResult(result);
+                                  setShowDetailModal(true);
+                                  onViewDetails?.(result);
                                 }
                               }}
                             >
@@ -423,7 +471,6 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 ml-2">
-                                    {/* Hide score badge on SQL rows */}
                                     {!isSQL && typeof result.result_score === "number" && (
                                       <Badge variant="outline" className="text-xs">
                                         {Number(result.result_score).toFixed(2)}
@@ -434,7 +481,9 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                                       variant="ghost"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        handleViewDetails(result);
+                                        setSelectedResult(result);
+                                        setShowDetailModal(true);
+                                        onViewDetails?.(result);
                                       }}
                                     >
                                       <Eye className="w-3 h-3 text-brand-red" />
