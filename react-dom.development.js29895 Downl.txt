@@ -27,7 +27,7 @@ import ResultDetailModal from "./ResultDetailModal";
 interface EnhancedResultsPanelProps {
   isVisible: boolean;
   onClose: () => void;
-  resultData: any;                 // potentially an array of responses or one response object
+  resultData: any;
   resultType?: string;
   onViewDetails?: (result: NormalizedResult) => void;
   onExportData?: (results: NormalizedResult[]) => void;
@@ -41,7 +41,7 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
   onViewDetails,
   onExportData,
 }) => {
-  // State management
+  // State
   const [activeTab, setActiveTab] = useState<ResultTab>("sql");
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortOption>("relevance");
@@ -52,24 +52,15 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
   // ---------- Only-latest selection ----------
   const pickLatestPayload = (data: any) => {
     if (!data) return null;
-
-    // Case 1: resultData is an array of responses -> take the last one
-    if (Array.isArray(data)) {
-      return data.length ? data[data.length - 1] : null;
-    }
-
-    // Case 2: resultData has a top-level `responses` array -> take the last one
-    if (data && Array.isArray(data.responses)) {
+    if (Array.isArray(data)) return data.length ? data[data.length - 1] : null;
+    if (data && Array.isArray(data.responses))
       return data.responses.length ? data.responses[data.responses.length - 1] : null;
-    }
-
-    // Default: assume it's already the latest response object
     return data;
   };
 
   const latestData = useMemo(() => pickLatestPayload(resultData), [resultData]);
 
-  // Helper functions
+  // Helpers
   const determineSourceType = (record: any): "sql" | "embedding" | "web" => {
     if (record?.type === "web" || record?.url) return "web";
     if (typeof record?.result_score === "number" && record.result_score > 0) return "embedding";
@@ -79,12 +70,10 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
   const processResultItem = (item: any, sourceType?: string): NormalizedResult[] => {
     if (!item) return [];
 
-    // Handle array of results
     if (Array.isArray(item)) {
       return item.flatMap((subItem) => processResultItem(subItem, sourceType));
     }
 
-    // Handle table result with results array
     if (item.results && Array.isArray(item.results)) {
       return item.results.map((record: any, index: number) => ({
         id: record.id || record.internal_id || `${item.table || "result"}-${index}`,
@@ -99,7 +88,6 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
       }));
     }
 
-    // Handle direct result object
     return [
       {
         id: item.id || item.internal_id || `result-${Math.random()}`,
@@ -125,7 +113,17 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
       .replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
-  // Process and normalize results (ONLY from the latestData)
+  // FIX #2: define getDisplayName BEFORE getFilteredResults (avoids no-use-before-define)
+  const getDisplayName = (result: NormalizedResult): string => {
+    if (result.title) return result.title;
+    const rec = result.record || {};
+    for (const f of ["name", "device_name", "plan_name", "question", "title"]) {
+      if ((rec as any)[f]) return (rec as any)[f];
+    }
+    return `${result.result_source} Result`;
+  };
+
+  // Process & normalize only latestData
   const {
     normalizedResults,
     counts,
@@ -148,17 +146,13 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
 
     try {
       if (Array.isArray(latestData)) {
-        // If the latest chunk itself is an array, normalize that only
         normalized = latestData.flatMap((item) => processResultItem(item));
       } else if (typeof latestData === "object") {
-        // Common shapes: { sql, embedding, web } or a single table result object
-        if (latestData.sql) normalized.push(...processResultItem(latestData.sql, "sql"));
-        if (latestData.embedding)
-          normalized.push(...processResultItem(latestData.embedding, "embedding"));
-        if (latestData.web) normalized.push(...processResultItem(latestData.web, "web"));
-
-        // If none of the above keys exist, treat the object as a direct result holder
-        if (!latestData.sql && !latestData.embedding && !latestData.web) {
+        if ((latestData as any).sql) normalized.push(...processResultItem((latestData as any).sql, "sql"));
+        if ((latestData as any).embedding)
+          normalized.push(...processResultItem((latestData as any).embedding, "embedding"));
+        if ((latestData as any).web) normalized.push(...processResultItem((latestData as any).web, "web"));
+        if (!(latestData as any).sql && !(latestData as any).embedding && !(latestData as any).web) {
           normalized.push(...processResultItem(latestData));
         }
       }
@@ -191,7 +185,7 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
     else if (counts.embedding > 0) setActiveTab("embedding");
   }, [resultType, counts]);
 
-  // Get filtered results per tab
+  // Filtered results per tab
   const getFilteredResults = useMemo(() => {
     return (tabType: ResultTab) => {
       let filtered = normalizedResults.filter((r) => r.result_source === tabType);
@@ -229,19 +223,10 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
 
       return filtered;
     };
-  }, [normalizedResults, filter, sortBy, searchQuery]);
+  }, [normalizedResults, filter, sortBy, searchQuery, getDisplayName]);
 
-  // Current tab results for export button
+  // Current tab results for export
   const filteredResultsForActiveTab = getFilteredResults(activeTab);
-
-  const getDisplayName = (result: NormalizedResult): string => {
-    if (result.title) return result.title;
-    const rec = result.record || {};
-    for (const f of ["name", "device_name", "plan_name", "question", "title"]) {
-      if (rec[f]) return rec[f];
-    }
-    return `${result.result_source} Result`;
-  };
 
   const handleViewDetails = (result: NormalizedResult) => {
     setSelectedResult(result);
@@ -262,7 +247,6 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
 
   if (!isVisible) return null;
 
-  // Map counts to a record that is indexable by ResultTab (fixes TS error)
   const tabCounts: Record<ResultTab, number> = {
     sql: counts.sql,
     embedding: counts.embedding,
@@ -394,7 +378,7 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                                   e.preventDefault();
                                   handleViewDetails(result);
                                 }
-                              })}
+                              }}  // FIX #1: removed stray brace
                             >
                               <div className="space-y-2">
                                 <div className="flex items-start justify-between">
@@ -409,7 +393,6 @@ const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 ml-2">
-                                    {/* Hide score badge on SQL rows */}
                                     {!isSQL && typeof result.result_score === "number" && (
                                       <Badge variant="outline" className="text-xs">
                                         {result.result_score.toFixed(2)}
