@@ -1,539 +1,1018 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import React, { useEffect, useRef, useState } from "react";
+import { useAuth } from "@/auth/AuthContext";
+import { apiClient } from "@/api/gen/client";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Eye,
-  X,
-  Search as SearchIcon,
-  Database,
-  Globe,
-  Filter,
-  SortAsc,
-  Download,
-} from "lucide-react";
-import { NormalizedResult, ResultTab, SortOption } from "./types";
-import ResultDetailModal from "./ResultDetailModal";
+  ChatMessage,
+  MilestoneState,
+  SSEStreamParser,
+  getContextAwareTip,
+} from "@/types/chat";
+import { StreamEvent } from "@/api/gen/types";
+import { ChatSession } from "@/api/gen/types";
+import { NormalizedResult } from "@/components/results/types";
+import ChatThread from "./ChatThread";
+import MessageComposer from "./MessageComposer";
+import EnhancedResultsPanel from "@/components/results/EnhancedResultsPanel";
+import ResultsModal from "./ResultsModal";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
-interface EnhancedResultsPanelProps {
-  isVisible: boolean;
-  onClose: () => void;
-  resultData: any;
-  resultType?: string;
-  onViewDetails?: (result: NormalizedResult) => void;
-  onExportData?: (results: NormalizedResult[]) => void;
-}
+import HeaderBar from "./parts/HeaderBar";
+import SessionsSidebar from "./parts/SessionsSidebar";
 
-const EnhancedResultsPanel: React.FC<EnhancedResultsPanelProps> = ({
-  isVisible,
-  onClose,
-  resultData,
-  resultType,
-  onViewDetails,
-  onExportData,
-}) => {
-  // ---------- State ----------
-  const [activeTab, setActiveTab] = useState<ResultTab>("sql");
-  const [filter, setFilter] = useState("all");
-  const [sortBy, setSortBy] = useState<SortOption>("relevance");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedResult, setSelectedResult] = useState<NormalizedResult | null>(null);
-  const [showDetailModal, setShowDetailModal] = useState(false);
-  const [scope, setScope] = useState<"latest" | "all">("latest");
-
-  // ---------- Helpers ----------
-  const toArray = (v: any): any[] =>
-    v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
-
-  const tail1 = (arr: any[]) => (arr.length ? [arr[arr.length - 1]] : []);
-
-  const looksNormalized = (x: any) =>
-    x && typeof x === "object" && "id" in x && "result_source" in x;
-
-  const determineSourceType = (record: any): ResultTab => {
-    if (!record) return "sql";
-    if (record.result_source && ["sql", "web", "embedding"].includes(record.result_source))
-      return record.result_source as ResultTab;
-    if (record?.type === "web" || record?.url) return "web";
-    if (typeof record?.result_score === "number" && record.result_score > 0) return "embedding";
-    return "sql";
-  };
-
-  const formatTableType = (tableName?: string): string => {
-    if (!tableName) return "Other";
-    return tableName
-      .replace(/([A-Z])/g, " $1")
-      .replace(/_/g, " ")
-      .replace(/^combined\s+/i, "")
-      .trim()
-      .replace(/\b\w/g, (l) => l.toUpperCase());
-  };
-
-  const getDisplayName = (result: NormalizedResult): string => {
-    if (result.title) return result.title;
-    const rec = (result.record || {}) as any;
-    for (const f of ["name", "device_name", "plan_name", "question", "title"]) {
-      if (rec[f]) return String(rec[f]);
-    }
-    return `${result.result_source} Result`;
-  };
-
-  const getTabIcon = (tab: ResultTab) => {
-    switch (tab) {
-      case "sql":
-        return Database;
-      case "embedding":
-        return SearchIcon;
-      case "web":
-        return Globe;
-    }
-  };
-
-  const coerceToNormalized = (item: any, fallbackSource: ResultTab): NormalizedResult[] => {
+// Normalize results (moved in-file to avoid import churn)
+const normalizeResults = (
+  results: any[],
+  type: "sql" | "web" | "embedding"
+): NormalizedResult[] => {
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((item: any, index: number) => {
     if (!item) return [];
-
-    // Already normalized
-    if (looksNormalized(item)) {
-      const r = item as NormalizedResult;
-      // Ensure result_source exists and is one of the tabs
-      const rs: ResultTab = ["sql", "web", "embedding"].includes(
-        String(r.result_source)
-      )
-        ? (r.result_source as ResultTab)
-        : fallbackSource;
-      return [{ ...r, result_source: rs }];
-    }
-
-    // If it's a list of items
-    if (Array.isArray(item)) {
-      return item.flatMap((x) => coerceToNormalized(x, fallbackSource));
-    }
-
-    // Raw shape that may contain a nested .results array
-    if (item.results && Array.isArray(item.results)) {
-      return item.results.map((record: any, idx: number) => {
-        const rs: ResultTab = determineSourceType(record) || fallbackSource;
-        return {
-          id: record.id || record.internal_id || `${item.table || "result"}-${idx}`,
-          result_source: rs,
+    if (type === "web") {
+      if (Array.isArray(item.results)) {
+        return item.results.map((result: any, idx: number) => ({
+          id: `web-${index}-${idx}`,
+          result_source: "web",
+          result_score: result.result_score || 0,
+          title: result.title || "Untitled",
+          url: result.url || "",
+          record: {
+            snippet: result.content || result.snippet || "",
+            content: result.content || result.snippet || "",
+            source: result.url
+              ? result.url.startsWith("http")
+                ? new URL(result.url).hostname
+                : result.url
+              : "unknown",
+            ...result,
+          },
+          timestamp: result.timestamp || new Date().toISOString(),
+        }));
+      } else if (item.results && typeof item.results === "object") {
+        return [
+          {
+            id: `web-${index}-0`,
+            result_source: "web",
+            result_score: item.results.result_score || 0,
+            title: item.results.title || "Untitled",
+            url: item.results.url || "",
+            record: {
+              snippet: item.results.content || item.results.snippet || "",
+              content: item.results.content || item.results.snippet || "",
+              source: item.results.url
+                ? item.results.url.startsWith("http")
+                  ? new URL(item.results.url).hostname
+                  : item.results.url
+                : "unknown",
+              ...item.results,
+            },
+            timestamp: item.results.timestamp || new Date().toISOString(),
+          },
+        ];
+      } else if (item.url || item.title) {
+        return [
+          {
+            id: `web-${index}`,
+            result_source: "web",
+            result_score: item.result_score || 0,
+            title: item.title || "Untitled",
+            url: item.url || "",
+            record: {
+              snippet: item.content || item.snippet || "",
+              content: item.content || item.snippet || "",
+              source: item.url
+                ? item.url.startsWith("http")
+                  ? new URL(item.url).hostname
+                  : item.url
+                : "unknown",
+              ...item,
+            },
+            timestamp: item.timestamp || new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
+    } else {
+      if (Array.isArray(item.results)) {
+        return item.results.map((record: any, idx: number) => ({
+          id: `${type}-${index}-${idx}`,
+          result_source: record.result_source || type,
           result_score: record.result_score || 0,
-          table: item.table || record.table,
-          title: record.title || record.name || record.device_name,
+          table: item.table || record.table || "Database Results",
+          query: item.query || record.query || "",
+          title:
+            record.name ||
+            record.device_name ||
+            record.plan_name ||
+            record.title ||
+            item.table ||
+            "Record",
           record,
-          url: record.url || record.link,
-          timestamp: record.timestamp || record.created_at,
-        };
+          timestamp: record.timestamp || new Date().toISOString(),
+        }));
+      } else if (
+        item.table ||
+        item.query ||
+        item.name ||
+        item.device_name ||
+        item.plan_name ||
+        Object.keys(item).length > 2
+      ) {
+        return [
+          {
+            id: `${type}-${index}`,
+            result_source: item.result_source || type,
+            result_score: item.result_score || 0,
+            table: item.table || "Database Results",
+            query: item.query || "",
+            title:
+              item.name ||
+              item.device_name ||
+              item.plan_name ||
+              item.title ||
+              item.table ||
+              "Record",
+            record: item,
+            timestamp: item.timestamp || new Date().toISOString(),
+          },
+        ];
+      }
+      return [];
+    }
+  });
+};
+
+const Chat: React.FC = () => {
+  // Chat state
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [currentMilestone, setCurrentMilestone] = useState<
+    MilestoneState | undefined
+  >();
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Session management
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [isRenamingSession, setIsRenamingSession] = useState<{
+    active: boolean;
+    id: string | null;
+    title: string;
+  }>({ active: false, id: null, title: "" });
+  const [favoriteSessionIds, setFavoriteSessionIds] = useState<string[]>([]);
+  const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Results panel
+  const [showResultsPanel, setShowResultsPanel] = useState(false);
+  const [resultsPanelData, setResultsPanelData] = useState<any>(null);
+  const [resultsPanelType, setResultsPanelType] = useState<string>("");
+
+  // Modal
+  const [showModal, setShowModal] = useState(false);
+  const [selectedResultData, setSelectedResultData] = useState<any>(null);
+  const [selectedResultType, setSelectedResultType] = useState<string | null>(
+    null
+  );
+
+  // Session warning (unchanged)
+  const [sessionWarning, setSessionWarning] = useState({
+    show: false,
+    countdown: 0,
+  });
+
+  // Example prompt handling
+  const [selectedExample, setSelectedExample] = useState<string>("");
+
+  const streamParserRef = useRef(new SSEStreamParser());
+  const currentInteractionIdRef = useRef<string | null>(null);
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+
+  // NEW: Abort + generation guards (used for Stop & history-coherent behavior)
+  const abortRef = useRef<AbortController | null>(null);
+  const generationIdRef = useRef<number>(0);
+
+  const { currentUser, logout } = useAuth();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    loadSessions();
+    loadFavoritesAndArchived();
+  }, []);
+
+  const loadFavoritesAndArchived = () => {
+    try {
+      const storedFavorites = localStorage.getItem("favoriteSessionIds");
+      if (storedFavorites) setFavoriteSessionIds(JSON.parse(storedFavorites));
+      const storedArchived = localStorage.getItem("archivedSessionIds");
+      if (storedArchived) setArchivedSessionIds(JSON.parse(storedArchived));
+    } catch (e) {
+      console.error("Failed to load favorites/archived:", e);
+    }
+  };
+
+  // Helper: cancel any active generation and quarantine late chunks
+  const cancelActiveGeneration = (silent = true) => {
+    // bump generation id to ignore any late chunks
+    generationIdRef.current += 1;
+
+    // abort in-flight fetch/stream
+    try {
+      abortRef.current?.abort();
+    } catch {}
+
+    if (readerRef.current) {
+      try {
+        readerRef.current.cancel("user_cancelled");
+      } catch {}
+      readerRef.current = null;
+    }
+
+    streamParserRef.current.reset();
+    abortRef.current = null;
+
+    // flip UI flags and finalize current assistant bubble
+    setIsProcessing(false);
+    setCurrentMilestone(undefined);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === currentInteractionIdRef.current ? { ...m, isStreaming: false } : m
+      )
+    );
+    currentInteractionIdRef.current = null;
+
+    if (!silent) {
+      toast({ title: "Stopped", description: "Response generation has been stopped" });
+    }
+  };
+
+  const loadSessions = async () => {
+    try {
+      const sessionsData = await apiClient.getSessions();
+      setSessions(sessionsData);
+    } catch (error) {
+      console.error("Failed to load sessions:", error);
+      toast({
+        title: "Failed to load sessions",
+        description: "Could not load your conversation history",
+        variant: "destructive",
       });
     }
-
-    // Single raw object → normalize
-    const rs: ResultTab = determineSourceType(item) || fallbackSource;
-    return [
-      {
-        id: item.id || item.internal_id || `result-${Math.random()}`,
-        result_source: rs,
-        result_score: item.result_score || 0,
-        table: item.table,
-        title: item.title || item.name || item.device_name,
-        record: item,
-        url: item.url || item.link,
-        timestamp: item.timestamp || item.created_at,
-      },
-    ];
   };
 
-  // Pull the last payload from nested histories if present
-  const extractLatestPayload = (data: any): any => {
-    if (!data) return data;
-    if (Array.isArray(data)) return data.length ? extractLatestPayload(data[data.length - 1]) : data;
-    const keys = ["responses", "history", "turns", "items", "entries", "chunks", "results"];
-    for (const k of keys) {
-      const v = data?.[k];
-      if (Array.isArray(v) && v.length) return extractLatestPayload(v[v.length - 1]);
-    }
-    return data;
-  };
+  const createNewSession = async (showToast: boolean = true) => {
+    if (!currentUser) return null;
 
-  // Group any incoming shape into explicit buckets
-  const groupIntoBuckets = (data: any): { sql: any[]; web: any[]; embedding: any[] } => {
-    if (!data) return { sql: [], web: [], embedding: [] };
+    // Ensure we don't leak an active stream into a new session
+    cancelActiveGeneration(true);
 
-    // Case 1: top-level buckets exist
-    if (typeof data === "object" && ("sql" in data || "web" in data || "embedding" in data)) {
-      return {
-        sql: toArray(data.sql),
-        web: toArray(data.web),
-        embedding: toArray(data.embedding),
-      };
-    }
-
-    // Case 2: array of mixed items
-    if (Array.isArray(data)) {
-      const sql: any[] = [];
-      const web: any[] = [];
-      const embedding: any[] = [];
-      for (const item of data) {
-        const rs = determineSourceType(item);
-        (rs === "sql" ? sql : rs === "web" ? web : embedding).push(item);
-      }
-      return { sql, web, embedding };
-    }
-
-    // Case 3: single object (decide its bucket)
-    const rs = determineSourceType(data);
-    return {
-      sql: rs === "sql" ? [data] : [],
-      web: rs === "web" ? [data] : [],
-      embedding: rs === "embedding" ? [data] : [],
-    };
-  };
-
-  // ---------- Scope and normalize ----------
-  const normalizedByTab = useMemo(() => {
-    // Step 1: find the latest payload if the data is nested
-    const base = scope === "latest" ? extractLatestPayload(resultData) : resultData;
-
-    // Step 2: group into buckets
-    const grouped = groupIntoBuckets(base);
-
-    // Step 3: if scope is "latest", take only the last item per bucket
-    const scopedBuckets =
-      scope === "latest"
-        ? {
-            sql: tail1(grouped.sql),
-            web: tail1(grouped.web),
-            embedding: tail1(grouped.embedding),
-          }
-        : grouped;
-
-    // Step 4: normalize per bucket WITHOUT double-normalizing already-normalized inputs
-    const sql = coerceToNormalized(scopedBuckets.sql, "sql");
-    const web = coerceToNormalized(scopedBuckets.web, "web");
-    const embedding = coerceToNormalized(scopedBuckets.embedding, "embedding");
-
-    return { sql, web, embedding };
-  }, [resultData, scope]);
-
-  // Flattened results & counts
-  const normalizedResults: NormalizedResult[] = useMemo(
-    () => [...normalizedByTab.sql, ...normalizedByTab.web, ...normalizedByTab.embedding],
-    [normalizedByTab]
-  );
-
-  const counts = useMemo(
-    () => ({
-      sql: normalizedByTab.sql.length,
-      web: normalizedByTab.web.length,
-      embedding: normalizedByTab.embedding.length,
-      total: normalizedByTab.sql.length + normalizedByTab.web.length + normalizedByTab.embedding.length,
-    }),
-    [normalizedByTab]
-  );
-
-  const availableFilters = useMemo(() => {
-    const set = new Set<string>();
-    normalizedResults.forEach((r) => set.add(formatTableType(r.table)));
-    // Remove the generic “Other” unless it’s the only thing we have
-    const arr = Array.from(set);
-    return arr.length > 1 ? arr.filter((x) => x !== "Other") : arr;
-  }, [normalizedResults]);
-
-  // ---------- Auto-switch tab ----------
-  useEffect(() => {
-    if (resultType === "web" && counts.web > 0) setActiveTab("web");
-    else if (counts.sql > 0) setActiveTab("sql");
-    else if (counts.embedding > 0) setActiveTab("embedding");
-  }, [resultType, counts]);
-
-  // ---------- Filtering / sorting ----------
-  const getFilteredResults = useMemo(() => {
-    return (tabType: ResultTab) => {
-      let filtered = normalizedResults.filter((r) => r.result_source === tabType);
-
-      if (filter !== "all") {
-        filtered = filtered.filter((r) => formatTableType(r.table) === filter);
-      }
-
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        filtered = filtered.filter((r) => {
-          const rec = (r.record || {}) as any;
-          const text = [
-            r.title,
-            rec?.name,
-            rec?.device_name,
-            rec?.plan_name,
-            rec?.question,
-            JSON.stringify(rec ?? {}),
-          ]
-            .join(" ")
-            .toLowerCase();
-          return text.includes(q);
+    try {
+      const newSession = await apiClient.createSession({
+        user_id: currentUser.id,
+        title: "New Conversation",
+      });
+      setSessionId(newSession.session_id);
+      setMessages([]);
+      await loadSessions();
+      if (showToast) {
+        toast({
+          title: "New conversation started",
+          description: "You can start chatting now",
         });
       }
-
-      if (sortBy === "name") {
-        filtered.sort((a, b) => getDisplayName(a).localeCompare(getDisplayName(b)));
-      } else if (sortBy === "timestamp") {
-        filtered.sort(
-          (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-        );
-      } else {
-        filtered.sort((a, b) => (Number(b.result_score) || 0) - (Number(a.result_score) || 0));
+      return newSession.session_id;
+    } catch (error) {
+      console.error("Failed to create session:", error);
+      if (showToast) {
+        toast({
+          title: "Failed to create session",
+          description: "Could not start a new conversation",
+          variant: "destructive",
+        });
       }
-
-      return filtered;
-    };
-  }, [normalizedResults, filter, sortBy, searchQuery]);
-
-  if (!isVisible) return null;
-
-  const tabCounts: Record<ResultTab, number> = {
-    sql: counts.sql,
-    embedding: counts.embedding,
-    web: counts.web,
+      return null;
+    }
   };
 
-  const filteredResultsForActiveTab = getFilteredResults(activeTab);
+  const loadSession = async (session: ChatSession) => {
+    // Make history restore consistent with Stop semantics:
+    // cancel any existing generation before switching
+    cancelActiveGeneration(true);
 
-  const handleViewDetails = (result: NormalizedResult) => {
-    setSelectedResult(result);
-    setShowDetailModal(true);
-    onViewDetails?.(result);
+    try {
+      setSessionId(session.session_id);
+      const messagesData = await apiClient.getSessionMessages(session.session_id);
+
+      const formattedMessages: ChatMessage[] = messagesData.map(
+        (msg: any, index: number) => {
+          let cleanContent = (msg.content || "")
+            .replace(/\[BOT_TYPE:[^\]]*\]/g, "")
+            .replace(/\[DONE\]/g, "")
+            .replace(/\[START\]/g, "")
+            .replace(/\[END\]/g, "")
+            .replace(/\[MILESTONE:[^\]]*\]/g, "")
+            .replace(/\[SQL_RESULTS\][\s\S]*?\[\/?END_SQL_RESULTS\]/g, "")
+            .replace(/\[WEB_RESULTS\][\s\S]*?\[\/?END_WEB_RESULTS\]/g, "")
+            .replace(
+              /\[EMBEDDING_RESULTS\][\s\S]*?\[\/?END_EMBEDDING_RESULTS\]/g,
+              ""
+            )
+            .replace(/\[[A-Z_]+:[^\]]*\]/g, "")
+            .replace(/\[[A-Z_]+\]/g, "")
+            .replace(/^```(?:\w+)?\n([\s\S]*?)\n```$/g, "$1")
+            .replace(/\n\s*\n\s*\n/g, "\n\n")
+            .trim();
+
+          const sender =
+            msg.sender === "bot"
+              ? "assistant"
+              : msg.sender === "user"
+              ? "user"
+              : msg.sender === "system"
+              ? "system"
+              : "assistant";
+
+          const normalizedSqlResults = normalizeResults(
+            msg.sql_results || [],
+            "sql"
+          );
+          const normalizedWebResults = normalizeResults(
+            msg.web_results || [],
+            "web"
+          );
+
+          return {
+            id: msg.message_id || `msg-${index}`,
+            sender,
+            content: cleanContent,
+            timestamp: new Date(msg.timestamp || Date.now()),
+            sqlResults: normalizedSqlResults,
+            webResults: normalizedWebResults,
+            embeddingResults: [],
+            isStreaming: false,
+          } as ChatMessage;
+        }
+      );
+
+      // On history load, mirror your current behavior for the side panel:
+      const lastBotMessage = [...messagesData]
+        .reverse()
+        .find((m: any) => m.sender === "bot");
+      const lastSqlResults = normalizeResults(
+        lastBotMessage?.sql_results || [],
+        "sql"
+      );
+      const lastWebResults = normalizeResults(
+        lastBotMessage?.web_results || [],
+        "web"
+      );
+      const allResults = { sql: lastSqlResults, web: lastWebResults, embedding: [] };
+
+      if (allResults.sql.length > 0 || allResults.web.length > 0) {
+        setResultsPanelData(allResults);
+        setResultsPanelType(allResults.web.length > 0 ? "web" : "sql");
+        setShowResultsPanel(true);
+      } else {
+        setShowResultsPanel(false);
+        setResultsPanelData(null);
+      }
+
+      setMessages(formattedMessages);
+      toast({
+        title: "Session loaded",
+        description: `Loaded ${formattedMessages.length} messages`,
+      });
+    } catch (error) {
+      console.error("Failed to load session:", error);
+      toast({
+        title: "Failed to load session",
+        description: "Could not load the conversation",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleViewFullResults = (
+    type: "web" | "sql" | "embedding",
+    results: { sql: any[]; web: any[]; embedding: any[] }
+  ) => {
+    setSelectedResultType(type);
+    setSelectedResultData(results);
+    setShowModal(true);
+  };
+
+  const sendMessage = async (messageText: string, webSearch: boolean) => {
+    if (!messageText.trim() || isProcessing) return;
+
+    // New generation: increment the id and snapshot it
+    generationIdRef.current += 1;
+    const activeGenerationId = generationIdRef.current;
+
+    // Create abort controller for this run
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let currentSessionId = sessionId;
+    if (!currentSessionId) {
+      currentSessionId = await createNewSession(false);
+      if (!currentSessionId) return;
+    }
+
+    const isFirstMessage = messages.length === 0;
+    if (isFirstMessage) {
+      try {
+        const titleFromMessage =
+          messageText.length > 50
+            ? messageText.substring(0, 50) + "..."
+            : messageText;
+        await apiClient.updateSession(currentSessionId, titleFromMessage);
+        await loadSessions();
+      } catch (e) {
+        console.error("Failed to update session title:", e);
+      }
+    }
+
+    setIsProcessing(true);
+    setCurrentMilestone({
+      stage: "START",
+      tip: getContextAwareTip(messageText).content,
+    });
+
+    const userMessage: ChatMessage = {
+      id: `user-${Date.now()}`,
+      sender: "user",
+      content: messageText,
+      timestamp: new Date(),
+    };
+
+    const assistantMessageId = `assistant-${Date.now()}`;
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      sender: "assistant",
+      content: "",
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    currentInteractionIdRef.current = assistantMessageId;
+    setSessionId(currentSessionId);
+
+    try {
+      // IMPORTANT: ensure apiClient.chat forwards `signal` to fetch/transport
+      const stream = await apiClient.chat({
+        query: messageText,
+        session_id: currentSessionId!,
+        web_search_enabled: webSearch,
+        signal: controller.signal, // <-- pass AbortSignal
+      });
+
+      const reader = stream.getReader();
+      readerRef.current = reader;
+      const decoder = new TextDecoder();
+      let fullAssistantBuffer = "";
+
+      while (true) {
+        // If superseded (Stop or new send), cancel and break
+        if (generationIdRef.current !== activeGenerationId) {
+          try {
+            await reader.cancel("user_cancelled");
+          } catch {}
+          break;
+        }
+
+        const { done, value } = await reader.read();
+        if (done) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === currentInteractionIdRef.current
+                ? { ...m, isStreaming: false }
+                : m
+            )
+          );
+          readerRef.current = null;
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk.trim()) continue;
+        fullAssistantBuffer += chunk;
+
+        const events = streamParserRef.current.parse(chunk);
+
+        // Guard updates so late chunks post-Stop do nothing
+        const stillActive = generationIdRef.current === activeGenerationId;
+        if (!stillActive) continue;
+
+        if (events.length > 0) {
+          for (const event of events) {
+            if (generationIdRef.current !== activeGenerationId) break;
+
+            switch (event.type) {
+              case "milestone":
+                setCurrentMilestone({
+                  stage: event.stage,
+                  tip: event.tip,
+                  message: event.message,
+                });
+                break;
+
+              case "token":
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === currentInteractionIdRef.current
+                      ? {
+                          ...m,
+                          content: (m.content || "") + event.content,
+                          isStreaming: true,
+                        }
+                      : m
+                  )
+                );
+                break;
+
+              case "results": {
+                const normalizedSql = normalizeResults(
+                  event.payload.sql || [],
+                  "sql"
+                );
+                const normalizedWeb = normalizeResults(
+                  event.payload.web || [],
+                  "web"
+                );
+                const normalizedEmbedding = normalizeResults(
+                  event.payload.embedding || [],
+                  "embedding"
+                );
+
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === currentInteractionIdRef.current
+                      ? {
+                          ...m,
+                          sqlResults: normalizedSql,
+                          webResults: normalizedWeb,
+                          embeddingResults: normalizedEmbedding,
+                          isStreaming: true,
+                        }
+                      : m
+                  )
+                );
+
+                setResultsPanelData({
+                  sql: normalizedSql,
+                  web: normalizedWeb,
+                  embedding: normalizedEmbedding,
+                });
+                setResultsPanelType(
+                  normalizedWeb.length > 0
+                    ? "web"
+                    : normalizedSql.length > 0
+                    ? "sql"
+                    : normalizedEmbedding.length > 0
+                    ? "embedding"
+                    : ""
+                );
+                setShowResultsPanel(true);
+                break;
+              }
+
+              case "final":
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === currentInteractionIdRef.current
+                      ? {
+                          ...m,
+                          content: event.full_content_markdown ?? m.content,
+                          isStreaming: false,
+                        }
+                      : m
+                  )
+                );
+                break;
+
+              case "meta":
+                if (event.session_title && currentSessionId) {
+                  setSessions((prev) =>
+                    prev.map((s) =>
+                      s.session_id === currentSessionId
+                        ? { ...s, title: event.session_title! }
+                        : s
+                    )
+                  );
+                }
+                break;
+
+              case "error":
+                toast({
+                  title: "Stream error",
+                  description: event.message,
+                  variant: "destructive",
+                });
+                break;
+            }
+          }
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === currentInteractionIdRef.current
+                ? { ...m, content: (m.content || "") + chunk, isStreaming: true }
+                : m
+            )
+          );
+        }
+      }
+
+      // Patch final results from buffered blocks (guarded)
+      if (generationIdRef.current === activeGenerationId) {
+        setMessages((prev) => {
+          const lastAssistantIdx = (() => {
+            for (let i = prev.length - 1; i >= 0; i--)
+              if (prev[i].sender === "assistant") return i;
+            return -1;
+          })();
+          if (lastAssistantIdx === -1) return prev;
+
+          let sqlResults: any[] = [];
+          let webResults: any[] = [];
+
+          const sqlMatch = fullAssistantBuffer.match(
+            /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
+          );
+          if (sqlMatch) {
+            try {
+              const sqlJson = JSON.parse(sqlMatch[1]);
+              sqlResults = normalizeResults(sqlJson, "sql");
+            } catch {}
+          }
+
+          const webMatch = fullAssistantBuffer.match(
+            /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
+          );
+          if (webMatch) {
+            try {
+              const webJson = JSON.parse(webMatch[1]);
+              webResults = normalizeResults(webJson, "web");
+            } catch {}
+          }
+
+          return prev.map((m, idx) =>
+            idx === lastAssistantIdx ? { ...m, sqlResults, webResults } : m
+          );
+        });
+
+        // Panel results from buffer
+        let bufSqlResults: any[] = [];
+        let bufWebResults: any[] = [];
+        const sqlMatch = fullAssistantBuffer.match(
+          /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
+        );
+        if (sqlMatch) {
+          try {
+            const sqlJson = JSON.parse(sqlMatch[1]);
+            bufSqlResults = normalizeResults(sqlJson, "sql");
+          } catch {}
+        }
+        const webMatch = fullAssistantBuffer.match(
+          /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
+        );
+        if (webMatch) {
+          try {
+            const webJson = JSON.parse(webMatch[1]);
+            bufWebResults = normalizeResults(webJson, "web");
+          } catch {}
+        }
+        if (bufSqlResults.length > 0 || bufWebResults.length > 0) {
+          setResultsPanelData({
+            sql: bufSqlResults,
+            web: bufWebResults,
+            embedding: [],
+          });
+          setResultsPanelType(
+            bufWebResults.length > 0 ? "web" : "sql"
+          );
+          setShowResultsPanel(true);
+        }
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === currentInteractionIdRef.current
+              ? { ...m, isStreaming: false }
+              : m
+          )
+        );
+      }
+    } catch (error: any) {
+      // Abort from Stop → no toast
+      if (error?.name === "AbortError" || error?.message === "user_cancelled") {
+        // do nothing
+      } else {
+        console.error("Chat error:", error);
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === currentInteractionIdRef.current
+              ? {
+                  ...m,
+                  content:
+                    "Sorry, I encountered an error processing your request. Please try again.",
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+        toast({
+          title: "Message failed",
+          description: "There was an error sending your message",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      // Only clear if this is still the active generation
+      if (generationIdRef.current === activeGenerationId) {
+        setIsProcessing(false);
+        setCurrentMilestone(undefined);
+        currentInteractionIdRef.current = null;
+        readerRef.current = null;
+        streamParserRef.current.reset();
+        abortRef.current = null;
+      }
+    }
+  };
+
+  const stopGeneration = () => {
+    // Use the unified cancel for consistent behavior
+    cancelActiveGeneration(false);
+  };
+
+  // Stream event handler (kept for API parity; guarded by use-sites)
+  const handleStreamEvent = async (
+    event: StreamEvent,
+    messageId: string,
+    currentContent: string
+  ) => {
+    switch (event.type) {
+      case "milestone":
+        setCurrentMilestone({
+          stage: event.stage,
+          tip: event.tip,
+          message: event.message,
+        });
+        break;
+      case "token":
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, content: currentContent + event.content }
+              : msg
+          )
+        );
+        break;
+      case "results":
+        if (event.payload) {
+          setResultsPanelData(event.payload);
+          setResultsPanelType("sql");
+          setShowResultsPanel(true);
+        }
+        break;
+      case "final":
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, content: event.full_content_markdown, isStreaming: false }
+              : msg
+          )
+        );
+        break;
+      case "meta":
+        if (event.session_title && sessionId) {
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.session_id === sessionId ? { ...s, title: event.session_title! } : s
+            )
+          );
+        }
+        break;
+      case "error":
+        console.error("Stream error:", event.message);
+        toast({
+          title: "Stream error",
+          description: event.message,
+          variant: "destructive",
+        });
+        break;
+    }
+  };
+
+  // Sidebar actions
+  const startRenameSession = (session: ChatSession) => {
+    // No stream mutation; still cancel to keep invariants tight
+    cancelActiveGeneration(true);
+    setIsRenamingSession({
+      active: true,
+      id: session.session_id,
+      title: session.title,
+    });
+  };
+
+  const confirmRenameSession = async () => {
+    if (!isRenamingSession.id || !isRenamingSession.title.trim()) return;
+    try {
+      await apiClient.updateSession(
+        isRenamingSession.id,
+        isRenamingSession.title.trim()
+      );
+      await loadSessions();
+      setIsRenamingSession({ active: false, id: null, title: "" });
+      toast({
+        title: "Session renamed",
+        description: "Conversation title has been updated",
+      });
+    } catch (error) {
+      console.error("Failed to rename session:", error);
+      toast({
+        title: "Rename failed",
+        description: "Could not update the conversation title",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const deleteSession = async (sessionToDelete: ChatSession) => {
+    // Avoid deleting while streaming
+    cancelActiveGeneration(true);
+    try {
+      await apiClient.deleteSession(sessionToDelete.session_id);
+      if (sessionId === sessionToDelete.session_id) {
+        setSessionId(null);
+        setMessages([]);
+        setShowResultsPanel(false);
+        setResultsPanelData(null);
+      }
+      await loadSessions();
+      toast({
+        title: "Session deleted",
+        description: "Conversation has been removed",
+      });
+    } catch (error) {
+      console.error("Failed to delete session:", error);
+      toast({
+        title: "Delete failed",
+        description: "Could not delete the conversation",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const toggleFavoriteSession = (id: string) => {
+    setFavoriteSessionIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem("favoriteSessionIds", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleArchiveSession = (id: string) => {
+    setArchivedSessionIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem("archivedSessionIds", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleLogout = async () => {
+    cancelActiveGeneration(true);
+    try {
+      await logout();
+      toast({
+        title: "Logged out",
+        description: "You have been successfully logged out",
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+      toast({
+        title: "Logout failed",
+        description: "There was an error logging out",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleExampleClick = (example: string) => {
+    setSelectedExample(example);
+    // Reset after a short delay to allow for future clicks
+    setTimeout(() => setSelectedExample(""), 100);
   };
 
   return (
-    <>
-      <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="px-6 py-4 border-b flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Results Panel</h2>
-            <div className="flex items-center gap-2">
-              {onExportData && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onExportData(filteredResultsForActiveTab)}
-                  className="h-8"
-                >
-                  <Download className="w-4 h-4 mr-2 text-brand-red" />
-                  Export
-                </Button>
-              )}
-              <Button variant="ghost" size="sm" onClick={onClose} className="h-8 w-8 p-0">
-                <X className="w-4 h-4 text-brand-red" />
-              </Button>
+    <SidebarProvider className="h-screen overflow-hidden">
+      <div className="h-screen flex w-full overflow-hidden">
+        <SessionsSidebar
+          sessions={sessions}
+          sessionId={sessionId}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          favoriteSessionIds={favoriteSessionIds}
+          archivedSessionIds={archivedSessionIds}
+          onLoadSession={loadSession}
+          onStartRename={startRenameSession}
+          isRenaming={isRenamingSession}
+          setIsRenaming={setIsRenamingSession}
+          onConfirmRename={confirmRenameSession}
+          onToggleFavorite={toggleFavoriteSession}
+          onToggleArchive={toggleArchiveSession}
+          onDelete={deleteSession}
+          onNewChat={() => {
+            // keep the “Stop” semantics consistent when starting fresh
+            cancelActiveGeneration(true);
+            setSessionId(null);
+            setMessages([]);
+            setShowResultsPanel(false);
+            setResultsPanelData(null);
+          }}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
+
+        {/* Main Content Area */}
+        <div className="flex-1 flex h-screen overflow-hidden">
+          {/* Chat Section */}
+          <div
+            className={cn(
+              "flex flex-col transition-all duration-300 overflow-hidden",
+              showResultsPanel ? "flex-1" : "w-full"
+            )}
+          >
+            <HeaderBar
+              sessionId={sessionId}
+              sessions={sessions}
+              sessionWarning={sessionWarning}
+              showResultsPanel={showResultsPanel}
+              setShowResultsPanel={setShowResultsPanel}
+            />
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto">
+              <ChatThread
+                messages={messages}
+                currentMilestone={currentMilestone}
+                onViewFullResults={handleViewFullResults}
+                onExampleClick={handleExampleClick}
+              />
+            </div>
+
+            {/* Composer */}
+            <div className="flex-shrink-0 bg-background">
+              <MessageComposer
+                onSendMessage={sendMessage}
+                onInputFocus={() => {}}
+                isLoading={isProcessing}
+                webSearchEnabled={webSearchEnabled}
+                onWebSearchToggle={setWebSearchEnabled}
+                initialMessage={selectedExample}
+                onStop={stopGeneration}
+              />
             </div>
           </div>
+
+          {/* Results Panel */}
+          {showResultsPanel && (
+            <div className="w-96 border-l bg-background flex-shrink-0 h-full overflow-hidden">
+              <EnhancedResultsPanel
+                isVisible={showResultsPanel}
+                onClose={() => setShowResultsPanel(false)}
+                resultData={resultsPanelData}
+                resultType={resultsPanelType}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Content */}
-        <div className="flex-1 min-h-0 flex flex-col">
-          <Tabs
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as ResultTab)}
-            className="flex flex-col h-full"
-          >
-            {/* Tabs */}
-            <TabsList className="grid w-full grid-cols-3 mx-6 mt-4 flex-shrink-0">
-              {(["sql", "embedding", "web"] as ResultTab[]).map((tab) => {
-                const Icon = getTabIcon(tab);
-                return (
-                  <TabsTrigger key={tab} value={tab} className="flex items-center gap-2">
-                    <Icon className="w-3 h-3 text-brand-red" />
-                    <span className="capitalize">{tab}</span>
-                    {tabCounts[tab] > 0 && (
-                      <Badge variant="secondary" className="text-xs">
-                        {tabCounts[tab]}
-                      </Badge>
-                    )}
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-
-            {/* Controls */}
-            <div className="px-6 pt-4 pb-4 border-b flex-shrink-0 space-y-3">
-              {/* Search */}
-              <div className="relative">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-red" />
-                <Input
-                  placeholder="Search results..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 w-full pl-9"
-                />
-              </div>
-
-              {/* Filters row */}
-              <div className="flex gap-2 flex-wrap">
-                {/* Type filter */}
-                <Select value={filter} onValueChange={setFilter}>
-                  <SelectTrigger className="w-40 h-9">
-                    <Filter className="w-3 h-3 mr-1 text-brand-red" />
-                    <SelectValue placeholder="All Types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    {availableFilters.map((opt) => (
-                      <SelectItem key={opt} value={opt}>
-                        {opt}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Sort */}
-                <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                  <SelectTrigger className="w-40 h-9">
-                    <SortAsc className="w-3 h-3 mr-1 text-brand-red" />
-                    <SelectValue placeholder="Relevance" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="relevance">Relevance</SelectItem>
-                    {/* <SelectItem value="name">Name</SelectItem> */}
-                    <SelectItem value="timestamp">Date</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Scope */}
-                <Select value={scope} onValueChange={(v) => setScope(v as "latest" | "all")}>
-                  <SelectTrigger className="w-44 h-9">
-                    <Globe className="w-3 h-3 mr-1 text-brand-red" />
-                    <SelectValue placeholder="Scope" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="latest">Scope: Latest</SelectItem>
-                    <SelectItem value="all">Scope: All Responses</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Results */}
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-              {(["sql", "embedding", "web"] as ResultTab[]).map((tab) => {
-                const tabResults = getFilteredResults(tab);
-                return (
-                  <TabsContent key={tab} value={tab} className="mt-0 space-y-3 h-full">
-                    {tabResults.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-muted/50 flex items-center justify-center">
-                          <SearchIcon className="w-5 h-5" />
-                        </div>
-                        <p>No {tab} results found</p>
-                        {searchQuery && <p className="text-sm">Try adjusting your search or filters</p>}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {tabResults.map((result) => {
-                          const isSQL = String(result.result_source).toLowerCase() === "sql";
-                          return (
-                            <Card
-                              key={result.id}
-                              className="p-4 hover:shadow-md transition-shadow cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring/50"
-                              onClick={() => {
-                                setSelectedResult(result);
-                                setShowDetailModal(true);
-                                onViewDetails?.(result);
-                              }}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  setSelectedResult(result);
-                                  setShowDetailModal(true);
-                                  onViewDetails?.(result);
-                                }
-                              }}
-                            >
-                              <div className="space-y-2">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <h4 className="font-medium text-sm truncate">
-                                      {getDisplayName(result)}
-                                    </h4>
-                                    {result.table && (
-                                      <p className="text-xs text-muted-foreground">
-                                        {formatTableType(result.table)}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 ml-2">
-                                    {!isSQL && typeof result.result_score === "number" && (
-                                      <Badge variant="outline" className="text-xs">
-                                        {Number(result.result_score).toFixed(2)}
-                                      </Badge>
-                                    )}
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedResult(result);
-                                        setShowDetailModal(true);
-                                        onViewDetails?.(result);
-                                      }}
-                                    >
-                                      <Eye className="w-3 h-3 text-brand-red" />
-                                    </Button>
-                                  </div>
-                                </div>
-
-                                {/* Preview content */}
-                                <div className="text-xs text-muted-foreground">
-                                  {Object.entries(result.record || {})
-                                    .slice(0, 2)
-                                    .map(([key, value]) => {
-                                      const valStr =
-                                        typeof value === "object"
-                                          ? JSON.stringify(value)
-                                          : String(value ?? "");
-                                      return (
-                                        <div key={key}>
-                                          <span className="font-medium">
-                                            {key.replace(/_/g, " ")}:
-                                          </span>{" "}
-                                          {valStr.length > 50 ? `${valStr.slice(0, 50)}...` : valStr}
-                                        </div>
-                                      );
-                                    })}
-                                </div>
-                              </div>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </TabsContent>
-                );
-              })}
-            </div>
-          </Tabs>
-        </div>
-      </div>
-
-      {showDetailModal && (
-        <ResultDetailModal
-          key={selectedResult?.id || "empty"}
-          result={selectedResult}
-          isOpen={showDetailModal}
-          onClose={() => setShowDetailModal(false)}
+        {/* Results Modal */}
+        <ResultsModal
+          isOpen={showModal}
+          onClose={() => setShowModal(false)}
+          title={
+            selectedResultData
+              ? `${
+                  selectedResultType === "embedding"
+                    ? "Internal Knowledge"
+                    : selectedResultType!.charAt(0).toUpperCase() +
+                      selectedResultType!.slice(1)
+                } Results`
+              : "Results"
+          }
+          allResults={selectedResultData || { sql: [], embedding: [], web: [] }}
+          activeTab={selectedResultType as "sql" | "embedding" | "web"}
         />
-      )}
-    </>
+      </div>
+    </SidebarProvider>
   );
 };
 
-export default EnhancedResultsPanel;
+export default Chat;
