@@ -189,9 +189,15 @@ const Chat: React.FC = () => {
   const currentInteractionIdRef = useRef<string | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
 
-  // NEW: Abort + generation guards (used for Stop & history-coherent behavior)
+  // Abort + generation guards
   const abortRef = useRef<AbortController | null>(null);
   const generationIdRef = useRef<number>(0);
+
+  // Track latest messages in a ref to read safely inside helpers
+  const messagesRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const { currentUser, logout } = useAuth();
   const { toast } = useToast();
@@ -212,8 +218,85 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Helper: cancel any active generation and quarantine late chunks
-  const cancelActiveGeneration = (silent = true) => {
+  // --- PERSISTENCE HELPERS ----------------------------------------------------
+
+  /**
+   * Returns the current assistant message (streaming bubble) from state, if any.
+   */
+  const getCurrentAssistantDraft = (): ChatMessage | null => {
+    const id = currentInteractionIdRef.current;
+    if (!id) return null;
+    const msg = messagesRef.current.find((m) => m.id === id && m.sender === "assistant");
+    return msg ?? null;
+  };
+
+  /**
+   * Persist the assistant draft as a normal bot message in history.
+   * Tries common API shapes; no-op if your backend already persists, or if no method exists.
+   */
+  const persistAssistantDraftToHistory = async () => {
+    const draft = getCurrentAssistantDraft();
+    if (!draft || !sessionId) return;
+
+    // Nothing to save if truly empty
+    const hasAnyContent =
+      (draft.content && draft.content.trim().length > 0) ||
+      (draft.sqlResults && draft.sqlResults.length > 0) ||
+      (draft.webResults && draft.webResults.length > 0) ||
+      (draft.embeddingResults && draft.embeddingResults.length > 0);
+
+    if (!hasAnyContent) return;
+
+    // Prepare a portable payload
+    const payload = {
+      session_id: sessionId,
+      sender: "bot",
+      content: draft.content ?? "",
+      sql_results: draft.sqlResults ?? [],
+      web_results: draft.webResults ?? [],
+      embedding_results: draft.embeddingResults ?? [],
+      timestamp: draft.timestamp ? new Date(draft.timestamp).toISOString() : new Date().toISOString(),
+      // mark as partial for backend (if you store that)
+      is_partial: true,
+    };
+
+    // Try different method names safely
+    const tryCalls: Array<() => Promise<any>> = [
+      // @ts-ignore
+      () => apiClient.saveMessage?.(payload),
+      // @ts-ignore
+      () => apiClient.addMessage?.(payload),
+      // @ts-ignore
+      () => apiClient.createMessage?.(payload),
+      // @ts-ignore
+      () => apiClient.appendMessage?.(payload),
+      // @ts-ignore
+      () => apiClient.upsertMessage?.(payload),
+    ].filter(Boolean) as Array<() => Promise<any>>;
+
+    for (const call of tryCalls) {
+      try {
+        await call();
+        return; // success on first working method
+      } catch (e) {
+        // try next
+      }
+    }
+
+    // If none worked, we silently skip (your server may already persist partials)
+  };
+
+  // Helper: cancel any active generation, optionally persisting the partial
+  const cancelActiveGeneration = async (silent = true, persistPartial = true) => {
+    // Save partial response before aborting if requested
+    if (persistPartial) {
+      try {
+        await persistAssistantDraftToHistory();
+      } catch {
+        // swallow; we still need to abort
+      }
+    }
+
     // bump generation id to ignore any late chunks
     generationIdRef.current += 1;
 
@@ -247,6 +330,8 @@ const Chat: React.FC = () => {
     }
   };
 
+  // --- SESSIONS ---------------------------------------------------------------
+
   const loadSessions = async () => {
     try {
       const sessionsData = await apiClient.getSessions();
@@ -264,8 +349,8 @@ const Chat: React.FC = () => {
   const createNewSession = async (showToast: boolean = true) => {
     if (!currentUser) return null;
 
-    // Ensure we don't leak an active stream into a new session
-    cancelActiveGeneration(true);
+    // Ensure we don't leak an active stream into a new session; persist draft too
+    await cancelActiveGeneration(true, true);
 
     try {
       const newSession = await apiClient.createSession({
@@ -274,6 +359,8 @@ const Chat: React.FC = () => {
       });
       setSessionId(newSession.session_id);
       setMessages([]);
+      setShowResultsPanel(false);
+      setResultsPanelData(null);
       await loadSessions();
       if (showToast) {
         toast({
@@ -297,8 +384,8 @@ const Chat: React.FC = () => {
 
   const loadSession = async (session: ChatSession) => {
     // Make history restore consistent with Stop semantics:
-    // cancel any existing generation before switching
-    cancelActiveGeneration(true);
+    // persist partial + cancel existing generation before switching
+    await cancelActiveGeneration(true, true);
 
     try {
       setSessionId(session.session_id);
@@ -392,6 +479,8 @@ const Chat: React.FC = () => {
       });
     }
   };
+
+  // --- UI ACTIONS ------------------------------------------------------------
 
   const handleViewFullResults = (
     type: "web" | "sql" | "embedding",
@@ -689,9 +778,7 @@ const Chat: React.FC = () => {
             web: bufWebResults,
             embedding: [],
           });
-          setResultsPanelType(
-            bufWebResults.length > 0 ? "web" : "sql"
-          );
+          setResultsPanelType(bufWebResults.length > 0 ? "web" : "sql");
           setShowResultsPanel(true);
         }
 
@@ -704,9 +791,9 @@ const Chat: React.FC = () => {
         );
       }
     } catch (error: any) {
-      // Abort from Stop → no toast
+      // Abort from Stop → no toast; but ensure partial persisted
       if (error?.name === "AbortError" || error?.message === "user_cancelled") {
-        // do nothing
+        // on abort, we already persist in cancelActiveGeneration
       } else {
         console.error("Chat error:", error);
 
@@ -741,9 +828,9 @@ const Chat: React.FC = () => {
     }
   };
 
-  const stopGeneration = () => {
-    // Use the unified cancel for consistent behavior
-    cancelActiveGeneration(false);
+  const stopGeneration = async () => {
+    // Persist partial + cancel for consistent behavior
+    await cancelActiveGeneration(false, true);
   };
 
   // Stream event handler (kept for API parity; guarded by use-sites)
@@ -806,9 +893,9 @@ const Chat: React.FC = () => {
   };
 
   // Sidebar actions
-  const startRenameSession = (session: ChatSession) => {
-    // No stream mutation; still cancel to keep invariants tight
-    cancelActiveGeneration(true);
+  const startRenameSession = async (session: ChatSession) => {
+    // Persist any partial + cancel to keep invariants tight
+    await cancelActiveGeneration(true, true);
     setIsRenamingSession({
       active: true,
       id: session.session_id,
@@ -840,8 +927,8 @@ const Chat: React.FC = () => {
   };
 
   const deleteSession = async (sessionToDelete: ChatSession) => {
-    // Avoid deleting while streaming
-    cancelActiveGeneration(true);
+    // Avoid deleting while streaming; persist draft first
+    await cancelActiveGeneration(true, true);
     try {
       await apiClient.deleteSession(sessionToDelete.session_id);
       if (sessionId === sessionToDelete.session_id) {
@@ -886,7 +973,7 @@ const Chat: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    cancelActiveGeneration(true);
+    await cancelActiveGeneration(true, true);
     try {
       await logout();
       toast({
@@ -927,9 +1014,9 @@ const Chat: React.FC = () => {
           onToggleFavorite={toggleFavoriteSession}
           onToggleArchive={toggleArchiveSession}
           onDelete={deleteSession}
-          onNewChat={() => {
+          onNewChat={async () => {
             // keep the “Stop” semantics consistent when starting fresh
-            cancelActiveGeneration(true);
+            await cancelActiveGeneration(true, true);
             setSessionId(null);
             setMessages([]);
             setShowResultsPanel(false);
