@@ -1,1105 +1,380 @@
-import React, { useEffect, useRef, useState } from "react";
-import { useAuth } from "@/auth/AuthContext";
-import { apiClient } from "@/api/gen/client";
-import {
-  ChatMessage,
-  MilestoneState,
-  SSEStreamParser,
-  getContextAwareTip,
-} from "@/types/chat";
-import { StreamEvent } from "@/api/gen/types";
-import { ChatSession } from "@/api/gen/types";
-import { NormalizedResult } from "@/components/results/types";
-import ChatThread from "./ChatThread";
-import MessageComposer from "./MessageComposer";
-import EnhancedResultsPanel from "@/components/results/EnhancedResultsPanel";
-import ResultsModal from "./ResultsModal";
-import { SidebarProvider } from "@/components/ui/sidebar";
-import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
-
-import HeaderBar from "./parts/HeaderBar";
-import SessionsSidebar from "./parts/SessionsSidebar";
-
-// Normalize results (moved in-file to avoid import churn)
-const normalizeResults = (
-  results: any[],
-  type: "sql" | "web" | "embedding"
-): NormalizedResult[] => {
-  if (!Array.isArray(results)) return [];
-  return results.flatMap((item: any, index: number) => {
-    if (!item) return [];
-    if (type === "web") {
-      if (Array.isArray(item.results)) {
-        return item.results.map((result: any, idx: number) => ({
-          id: `web-${index}-${idx}`,
-          result_source: "web",
-          result_score: result.result_score || 0,
-          title: result.title || "Untitled",
-          url: result.url || "",
-          record: {
-            snippet: result.content || result.snippet || "",
-            content: result.content || result.snippet || "",
-            source: result.url
-              ? result.url.startsWith("http")
-                ? new URL(result.url).hostname
-                : result.url
-              : "unknown",
-            ...result,
-          },
-          timestamp: result.timestamp || new Date().toISOString(),
-        }));
-      } else if (item.results && typeof item.results === "object") {
-        return [
-          {
-            id: `web-${index}-0`,
-            result_source: "web",
-            result_score: item.results.result_score || 0,
-            title: item.results.title || "Untitled",
-            url: item.results.url || "",
-            record: {
-              snippet: item.results.content || item.results.snippet || "",
-              content: item.results.content || item.results.snippet || "",
-              source: item.results.url
-                ? item.results.url.startsWith("http")
-                  ? new URL(item.results.url).hostname
-                  : item.results.url
-                : "unknown",
-              ...item.results,
-            },
-            timestamp: item.results.timestamp || new Date().toISOString(),
-          },
-        ];
-      } else if (item.url || item.title) {
-        return [
-          {
-            id: `web-${index}`,
-            result_source: "web",
-            result_score: item.result_score || 0,
-            title: item.title || "Untitled",
-            url: item.url || "",
-            record: {
-              snippet: item.content || item.snippet || "",
-              content: item.content || item.snippet || "",
-              source: item.url
-                ? item.url.startsWith("http")
-                  ? new URL(item.url).hostname
-                  : item.url
-                : "unknown",
-              ...item,
-            },
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-      return [];
-    } else {
-      if (Array.isArray(item.results)) {
-        return item.results.map((record: any, idx: number) => ({
-          id: `${type}-${index}-${idx}`,
-          result_source: record.result_source || type,
-          result_score: record.result_score || 0,
-          table: item.table || record.table || "Database Results",
-          query: item.query || record.query || "",
-          title:
-            record.name ||
-            record.device_name ||
-            record.plan_name ||
-            record.title ||
-            item.table ||
-            "Record",
-          record,
-          timestamp: record.timestamp || new Date().toISOString(),
-        }));
-      } else if (
-        item.table ||
-        item.query ||
-        item.name ||
-        item.device_name ||
-        item.plan_name ||
-        Object.keys(item).length > 2
-      ) {
-        return [
-          {
-            id: `${type}-${index}`,
-            result_source: item.result_source || type,
-            result_score: item.result_score || 0,
-            table: item.table || "Database Results",
-            query: item.query || "",
-            title:
-              item.name ||
-              item.device_name ||
-              item.plan_name ||
-              item.title ||
-              item.table ||
-              "Record",
-            record: item,
-            timestamp: item.timestamp || new Date().toISOString(),
-          },
-        ];
-      }
-      return [];
-    }
-  });
-};
-
-const Chat: React.FC = () => {
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [currentMilestone, setCurrentMilestone] = useState<
-    MilestoneState | undefined
-  >();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-
-  // Session management
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [isRenamingSession, setIsRenamingSession] = useState<{
-    active: boolean;
-    id: string | null;
-    title: string;
-  }>({ active: false, id: null, title: "" });
-  const [favoriteSessionIds, setFavoriteSessionIds] = useState<string[]>([]);
-  const [archivedSessionIds, setArchivedSessionIds] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // Results panel
-  const [showResultsPanel, setShowResultsPanel] = useState(false);
-  const [resultsPanelData, setResultsPanelData] = useState<any>(null);
-  const [resultsPanelType, setResultsPanelType] = useState<string>("");
-
-  // Modal
-  const [showModal, setShowModal] = useState(false);
-  const [selectedResultData, setSelectedResultData] = useState<any>(null);
-  const [selectedResultType, setSelectedResultType] = useState<string | null>(
-    null
-  );
-
-  // Session warning (unchanged)
-  const [sessionWarning, setSessionWarning] = useState({
-    show: false,
-    countdown: 0,
-  });
-
-  // Example prompt handling
-  const [selectedExample, setSelectedExample] = useState<string>("");
-
-  const streamParserRef = useRef(new SSEStreamParser());
-  const currentInteractionIdRef = useRef<string | null>(null);
-  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
-
-  // Abort + generation guards
-  const abortRef = useRef<AbortController | null>(null);
-  const generationIdRef = useRef<number>(0);
-
-  // Track latest messages in a ref to read safely inside helpers
-  const messagesRef = useRef<ChatMessage[]>([]);
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  const { currentUser, logout } = useAuth();
-  const { toast } = useToast();
-
-  useEffect(() => {
-    loadSessions();
-    loadFavoritesAndArchived();
-  }, []);
-
-  const loadFavoritesAndArchived = () => {
-    try {
-      const storedFavorites = localStorage.getItem("favoriteSessionIds");
-      if (storedFavorites) setFavoriteSessionIds(JSON.parse(storedFavorites));
-      const storedArchived = localStorage.getItem("archivedSessionIds");
-      if (storedArchived) setArchivedSessionIds(JSON.parse(storedArchived));
-    } catch (e) {
-      console.error("Failed to load favorites/archived:", e);
-    }
-  };
-
-  // --- PERSISTENCE HELPERS ----------------------------------------------------
-
-  /**
-   * Returns the current assistant message (streaming bubble) from state, if any.
-   */
-  const getCurrentAssistantDraft = (): ChatMessage | null => {
-    const id = currentInteractionIdRef.current;
-    if (!id) return null;
-    const msg = messagesRef.current.find((m) => m.id === id && m.sender === "assistant");
-    return msg ?? null;
-  };
-
-  /**
-   * Persist the assistant draft as a normal bot message in history.
-   * Tries common API shapes; no-op if your backend already persists, or if no method exists.
-   */
-  const persistAssistantDraftToHistory = async () => {
-    const draft = getCurrentAssistantDraft();
-    if (!draft || !sessionId) return;
-
-    // Nothing to save if truly empty
-    const hasAnyContent =
-      (draft.content && draft.content.trim().length > 0) ||
-      (draft.sqlResults && draft.sqlResults.length > 0) ||
-      (draft.webResults && draft.webResults.length > 0) ||
-      (draft.embeddingResults && draft.embeddingResults.length > 0);
-
-    if (!hasAnyContent) return;
-
-    // Prepare a portable payload
-    const payload = {
-      session_id: sessionId,
-      sender: "bot",
-      content: draft.content ?? "",
-      sql_results: draft.sqlResults ?? [],
-      web_results: draft.webResults ?? [],
-      embedding_results: draft.embeddingResults ?? [],
-      timestamp: draft.timestamp ? new Date(draft.timestamp).toISOString() : new Date().toISOString(),
-      // mark as partial for backend (if you store that)
-      is_partial: true,
-    };
-
-    // Try different method names safely
-    const tryCalls: Array<() => Promise<any>> = [
-      // @ts-ignore
-      () => apiClient.saveMessage?.(payload),
-      // @ts-ignore
-      () => apiClient.addMessage?.(payload),
-      // @ts-ignore
-      () => apiClient.createMessage?.(payload),
-      // @ts-ignore
-      () => apiClient.appendMessage?.(payload),
-      // @ts-ignore
-      () => apiClient.upsertMessage?.(payload),
-    ].filter(Boolean) as Array<() => Promise<any>>;
-
-    for (const call of tryCalls) {
-      try {
-        await call();
-        return; // success on first working method
-      } catch (e) {
-        // try next
-      }
-    }
-
-    // If none worked, we silently skip (your server may already persist partials)
-  };
-
-  // Helper: cancel any active generation, optionally persisting the partial
-  const cancelActiveGeneration = async (silent = true, persistPartial = true) => {
-    // Save partial response before aborting if requested
-    if (persistPartial) {
-      try {
-        await persistAssistantDraftToHistory();
-      } catch {
-        // swallow; we still need to abort
-      }
-    }
-
-    // bump generation id to ignore any late chunks
-    generationIdRef.current += 1;
-
-    // abort in-flight fetch/stream
-    try {
-      abortRef.current?.abort();
-    } catch {}
-
-    if (readerRef.current) {
-      try {
-        readerRef.current.cancel("user_cancelled");
-      } catch {}
-      readerRef.current = null;
-    }
-
-    streamParserRef.current.reset();
-    abortRef.current = null;
-
-    // flip UI flags and finalize current assistant bubble
-    setIsProcessing(false);
-    setCurrentMilestone(undefined);
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === currentInteractionIdRef.current ? { ...m, isStreaming: false } : m
-      )
-    );
-    currentInteractionIdRef.current = null;
-
-    if (!silent) {
-      toast({ title: "Stopped", description: "Response generation has been stopped" });
-    }
-  };
-
-  // --- SESSIONS ---------------------------------------------------------------
-
-  const loadSessions = async () => {
-    try {
-      const sessionsData = await apiClient.getSessions();
-      setSessions(sessionsData);
-    } catch (error) {
-      console.error("Failed to load sessions:", error);
-      toast({
-        title: "Failed to load sessions",
-        description: "Could not load your conversation history",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const createNewSession = async (showToast: boolean = true) => {
-    if (!currentUser) return null;
-
-    // Ensure we don't leak an active stream into a new session; persist draft too
-    await cancelActiveGeneration(true, true);
-
-    try {
-      const newSession = await apiClient.createSession({
-        user_id: currentUser.id,
-        title: "New Conversation",
-      });
-      setSessionId(newSession.session_id);
-      setMessages([]);
-      setShowResultsPanel(false);
-      setResultsPanelData(null);
-      await loadSessions();
-      if (showToast) {
-        toast({
-          title: "New conversation started",
-          description: "You can start chatting now",
-        });
-      }
-      return newSession.session_id;
-    } catch (error) {
-      console.error("Failed to create session:", error);
-      if (showToast) {
-        toast({
-          title: "Failed to create session",
-          description: "Could not start a new conversation",
-          variant: "destructive",
-        });
-      }
-      return null;
-    }
-  };
-
-  const loadSession = async (session: ChatSession) => {
-    // Make history restore consistent with Stop semantics:
-    // persist partial + cancel existing generation before switching
-    await cancelActiveGeneration(true, true);
-
-    try {
-      setSessionId(session.session_id);
-      const messagesData = await apiClient.getSessionMessages(session.session_id);
-
-      const formattedMessages: ChatMessage[] = messagesData.map(
-        (msg: any, index: number) => {
-          let cleanContent = (msg.content || "")
-            .replace(/\[BOT_TYPE:[^\]]*\]/g, "")
-            .replace(/\[DONE\]/g, "")
-            .replace(/\[START\]/g, "")
-            .replace(/\[END\]/g, "")
-            .replace(/\[MILESTONE:[^\]]*\]/g, "")
-            .replace(/\[SQL_RESULTS\][\s\S]*?\[\/?END_SQL_RESULTS\]/g, "")
-            .replace(/\[WEB_RESULTS\][\s\S]*?\[\/?END_WEB_RESULTS\]/g, "")
-            .replace(
-              /\[EMBEDDING_RESULTS\][\s\S]*?\[\/?END_EMBEDDING_RESULTS\]/g,
-              ""
-            )
-            .replace(/\[[A-Z_]+:[^\]]*\]/g, "")
-            .replace(/\[[A-Z_]+\]/g, "")
-            .replace(/^```(?:\w+)?\n([\s\S]*?)\n```$/g, "$1")
-            .replace(/\n\s*\n\s*\n/g, "\n\n")
-            .trim();
-
-          const sender =
-            msg.sender === "bot"
-              ? "assistant"
-              : msg.sender === "user"
-              ? "user"
-              : msg.sender === "system"
-              ? "system"
-              : "assistant";
-
-          const normalizedSqlResults = normalizeResults(
-            msg.sql_results || [],
-            "sql"
-          );
-          const normalizedWebResults = normalizeResults(
-            msg.web_results || [],
-            "web"
-          );
-
-          return {
-            id: msg.message_id || `msg-${index}`,
-            sender,
-            content: cleanContent,
-            timestamp: new Date(msg.timestamp || Date.now()),
-            sqlResults: normalizedSqlResults,
-            webResults: normalizedWebResults,
-            embeddingResults: [],
-            isStreaming: false,
-          } as ChatMessage;
-        }
-      );
-
-      // On history load, mirror your current behavior for the side panel:
-      const lastBotMessage = [...messagesData]
-        .reverse()
-        .find((m: any) => m.sender === "bot");
-      const lastSqlResults = normalizeResults(
-        lastBotMessage?.sql_results || [],
-        "sql"
-      );
-      const lastWebResults = normalizeResults(
-        lastBotMessage?.web_results || [],
-        "web"
-      );
-      const allResults = { sql: lastSqlResults, web: lastWebResults, embedding: [] };
-
-      if (allResults.sql.length > 0 || allResults.web.length > 0) {
-        setResultsPanelData(allResults);
-        setResultsPanelType(allResults.web.length > 0 ? "web" : "sql");
-        setShowResultsPanel(true);
-      } else {
-        setShowResultsPanel(false);
-        setResultsPanelData(null);
-      }
-
-      setMessages(formattedMessages);
-      toast({
-        title: "Session loaded",
-        description: `Loaded ${formattedMessages.length} messages`,
-      });
-    } catch (error) {
-      console.error("Failed to load session:", error);
-      toast({
-        title: "Failed to load session",
-        description: "Could not load the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // --- UI ACTIONS ------------------------------------------------------------
-
-  const handleViewFullResults = (
-    type: "web" | "sql" | "embedding",
-    results: { sql: any[]; web: any[]; embedding: any[] }
-  ) => {
-    setSelectedResultType(type);
-    setSelectedResultData(results);
-    setShowModal(true);
-  };
-
-  const sendMessage = async (messageText: string, webSearch: boolean) => {
-    if (!messageText.trim() || isProcessing) return;
-
-    // New generation: increment the id and snapshot it
-    generationIdRef.current += 1;
-    const activeGenerationId = generationIdRef.current;
-
-    // Create abort controller for this run
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    let currentSessionId = sessionId;
-    if (!currentSessionId) {
-      currentSessionId = await createNewSession(false);
-      if (!currentSessionId) return;
-    }
-
-    const isFirstMessage = messages.length === 0;
-    if (isFirstMessage) {
-      try {
-        const titleFromMessage =
-          messageText.length > 50
-            ? messageText.substring(0, 50) + "..."
-            : messageText;
-        await apiClient.updateSession(currentSessionId, titleFromMessage);
-        await loadSessions();
-      } catch (e) {
-        console.error("Failed to update session title:", e);
-      }
-    }
-
-    setIsProcessing(true);
-    setCurrentMilestone({
-      stage: "START",
-      tip: getContextAwareTip(messageText).content,
-    });
-
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: "user",
-      content: messageText,
-      timestamp: new Date(),
-    };
-
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      sender: "assistant",
-      content: "",
-      timestamp: new Date(),
-      isStreaming: true,
-    };
-
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
-    currentInteractionIdRef.current = assistantMessageId;
-    setSessionId(currentSessionId);
-
-    try {
-      // IMPORTANT: ensure apiClient.chat forwards `signal` to fetch/transport
-      const stream = await apiClient.chat({
-        query: messageText,
-        session_id: currentSessionId!,
-        web_search_enabled: webSearch,
-        signal: controller.signal, // <-- pass AbortSignal
-      });
-
-      const reader = stream.getReader();
-      readerRef.current = reader;
-      const decoder = new TextDecoder();
-      let fullAssistantBuffer = "";
-
-      while (true) {
-        // If superseded (Stop or new send), cancel and break
-        if (generationIdRef.current !== activeGenerationId) {
-          try {
-            await reader.cancel("user_cancelled");
-          } catch {}
-          break;
-        }
-
-        const { done, value } = await reader.read();
-        if (done) {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === currentInteractionIdRef.current
-                ? { ...m, isStreaming: false }
-                : m
-            )
-          );
-          readerRef.current = null;
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        if (!chunk.trim()) continue;
-        fullAssistantBuffer += chunk;
-
-        const events = streamParserRef.current.parse(chunk);
-
-        // Guard updates so late chunks post-Stop do nothing
-        const stillActive = generationIdRef.current === activeGenerationId;
-        if (!stillActive) continue;
-
-        if (events.length > 0) {
-          for (const event of events) {
-            if (generationIdRef.current !== activeGenerationId) break;
-
-            switch (event.type) {
-              case "milestone":
-                setCurrentMilestone({
-                  stage: event.stage,
-                  tip: event.tip,
-                  message: event.message,
-                });
-                break;
-
-              case "token":
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-                          content: (m.content || "") + event.content,
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-                break;
-
-              case "results": {
-                const normalizedSql = normalizeResults(
-                  event.payload.sql || [],
-                  "sql"
-                );
-                const normalizedWeb = normalizeResults(
-                  event.payload.web || [],
-                  "web"
-                );
-                const normalizedEmbedding = normalizeResults(
-                  event.payload.embedding || [],
-                  "embedding"
-                );
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-                          sqlResults: normalizedSql,
-                          webResults: normalizedWeb,
-                          embeddingResults: normalizedEmbedding,
-                          isStreaming: true,
-                        }
-                      : m
-                  )
-                );
-
-                setResultsPanelData({
-                  sql: normalizedSql,
-                  web: normalizedWeb,
-                  embedding: normalizedEmbedding,
-                });
-                setResultsPanelType(
-                  normalizedWeb.length > 0
-                    ? "web"
-                    : normalizedSql.length > 0
-                    ? "sql"
-                    : normalizedEmbedding.length > 0
-                    ? "embedding"
-                    : ""
-                );
-                setShowResultsPanel(true);
-                break;
-              }
-
-              case "final":
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === currentInteractionIdRef.current
-                      ? {
-                          ...m,
-                          content: event.full_content_markdown ?? m.content,
-                          isStreaming: false,
-                        }
-                      : m
-                  )
-                );
-                break;
-
-              case "meta":
-                if (event.session_title && currentSessionId) {
-                  setSessions((prev) =>
-                    prev.map((s) =>
-                      s.session_id === currentSessionId
-                        ? { ...s, title: event.session_title! }
-                        : s
-                    )
-                  );
-                }
-                break;
-
-              case "error":
-                toast({
-                  title: "Stream error",
-                  description: event.message,
-                  variant: "destructive",
-                });
-                break;
-            }
-          }
-        } else {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === currentInteractionIdRef.current
-                ? { ...m, content: (m.content || "") + chunk, isStreaming: true }
-                : m
-            )
-          );
-        }
-      }
-
-      // Patch final results from buffered blocks (guarded)
-      if (generationIdRef.current === activeGenerationId) {
-        setMessages((prev) => {
-          const lastAssistantIdx = (() => {
-            for (let i = prev.length - 1; i >= 0; i--)
-              if (prev[i].sender === "assistant") return i;
-            return -1;
-          })();
-          if (lastAssistantIdx === -1) return prev;
-
-          let sqlResults: any[] = [];
-          let webResults: any[] = [];
-
-          const sqlMatch = fullAssistantBuffer.match(
-            /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
-          );
-          if (sqlMatch) {
-            try {
-              const sqlJson = JSON.parse(sqlMatch[1]);
-              sqlResults = normalizeResults(sqlJson, "sql");
-            } catch {}
-          }
-
-          const webMatch = fullAssistantBuffer.match(
-            /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
-          );
-          if (webMatch) {
-            try {
-              const webJson = JSON.parse(webMatch[1]);
-              webResults = normalizeResults(webJson, "web");
-            } catch {}
-          }
-
-          return prev.map((m, idx) =>
-            idx === lastAssistantIdx ? { ...m, sqlResults, webResults } : m
-          );
-        });
-
-        // Panel results from buffer
-        let bufSqlResults: any[] = [];
-        let bufWebResults: any[] = [];
-        const sqlMatch = fullAssistantBuffer.match(
-          /\[SQL_RESULTS\]([\s\S]*?)\[END_SQL_RESULTS\]/
-        );
-        if (sqlMatch) {
-          try {
-            const sqlJson = JSON.parse(sqlMatch[1]);
-            bufSqlResults = normalizeResults(sqlJson, "sql");
-          } catch {}
-        }
-        const webMatch = fullAssistantBuffer.match(
-          /\[WEB_RESULTS\]([\s\S]*?)\[END_WEB_RESULTS\]/
-        );
-        if (webMatch) {
-          try {
-            const webJson = JSON.parse(webMatch[1]);
-            bufWebResults = normalizeResults(webJson, "web");
-          } catch {}
-        }
-        if (bufSqlResults.length > 0 || bufWebResults.length > 0) {
-          setResultsPanelData({
-            sql: bufSqlResults,
-            web: bufWebResults,
-            embedding: [],
-          });
-          setResultsPanelType(bufWebResults.length > 0 ? "web" : "sql");
-          setShowResultsPanel(true);
-        }
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === currentInteractionIdRef.current
-              ? { ...m, isStreaming: false }
-              : m
-          )
-        );
-      }
-    } catch (error: any) {
-      // Abort from Stop → no toast; but ensure partial persisted
-      if (error?.name === "AbortError" || error?.message === "user_cancelled") {
-        // on abort, we already persist in cancelActiveGeneration
-      } else {
-        console.error("Chat error:", error);
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === currentInteractionIdRef.current
-              ? {
-                  ...m,
-                  content:
-                    "Sorry, I encountered an error processing your request. Please try again.",
-                  isStreaming: false,
-                }
-              : m
-          )
-        );
-        toast({
-          title: "Message failed",
-          description: "There was an error sending your message",
-          variant: "destructive",
-        });
-      }
-    } finally {
-      // Only clear if this is still the active generation
-      if (generationIdRef.current === activeGenerationId) {
-        setIsProcessing(false);
-        setCurrentMilestone(undefined);
-        currentInteractionIdRef.current = null;
-        readerRef.current = null;
-        streamParserRef.current.reset();
-        abortRef.current = null;
-      }
-    }
-  };
-
-  const stopGeneration = async () => {
-    // Persist partial + cancel for consistent behavior
-    await cancelActiveGeneration(false, true);
-  };
-
-  // Stream event handler (kept for API parity; guarded by use-sites)
-  const handleStreamEvent = async (
-    event: StreamEvent,
-    messageId: string,
-    currentContent: string
-  ) => {
-    switch (event.type) {
-      case "milestone":
-        setCurrentMilestone({
-          stage: event.stage,
-          tip: event.tip,
-          message: event.message,
-        });
-        break;
-      case "token":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: currentContent + event.content }
-              : msg
-          )
-        );
-        break;
-      case "results":
-        if (event.payload) {
-          setResultsPanelData(event.payload);
-          setResultsPanelType("sql");
-          setShowResultsPanel(true);
-        }
-        break;
-      case "final":
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, content: event.full_content_markdown, isStreaming: false }
-              : msg
-          )
-        );
-        break;
-      case "meta":
-        if (event.session_title && sessionId) {
-          setSessions((prev) =>
-            prev.map((s) =>
-              s.session_id === sessionId ? { ...s, title: event.session_title! } : s
-            )
-          );
-        }
-        break;
-      case "error":
-        console.error("Stream error:", event.message);
-        toast({
-          title: "Stream error",
-          description: event.message,
-          variant: "destructive",
-        });
-        break;
-    }
-  };
-
-  // Sidebar actions
-  const startRenameSession = async (session: ChatSession) => {
-    // Persist any partial + cancel to keep invariants tight
-    await cancelActiveGeneration(true, true);
-    setIsRenamingSession({
-      active: true,
-      id: session.session_id,
-      title: session.title,
-    });
-  };
-
-  const confirmRenameSession = async () => {
-    if (!isRenamingSession.id || !isRenamingSession.title.trim()) return;
-    try {
-      await apiClient.updateSession(
-        isRenamingSession.id,
-        isRenamingSession.title.trim()
-      );
-      await loadSessions();
-      setIsRenamingSession({ active: false, id: null, title: "" });
-      toast({
-        title: "Session renamed",
-        description: "Conversation title has been updated",
-      });
-    } catch (error) {
-      console.error("Failed to rename session:", error);
-      toast({
-        title: "Rename failed",
-        description: "Could not update the conversation title",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const deleteSession = async (sessionToDelete: ChatSession) => {
-    // Avoid deleting while streaming; persist draft first
-    await cancelActiveGeneration(true, true);
-    try {
-      await apiClient.deleteSession(sessionToDelete.session_id);
-      if (sessionId === sessionToDelete.session_id) {
-        setSessionId(null);
-        setMessages([]);
-        setShowResultsPanel(false);
-        setResultsPanelData(null);
-      }
-      await loadSessions();
-      toast({
-        title: "Session deleted",
-        description: "Conversation has been removed",
-      });
-    } catch (error) {
-      console.error("Failed to delete session:", error);
-      toast({
-        title: "Delete failed",
-        description: "Could not delete the conversation",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const toggleFavoriteSession = (id: string) => {
-    setFavoriteSessionIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      try {
-        localStorage.setItem("favoriteSessionIds", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const toggleArchiveSession = (id: string) => {
-    setArchivedSessionIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      try {
-        localStorage.setItem("archivedSessionIds", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const handleLogout = async () => {
-    await cancelActiveGeneration(true, true);
-    try {
-      await logout();
-      toast({
-        title: "Logged out",
-        description: "You have been successfully logged out",
-      });
-    } catch (error) {
-      console.error("Logout error:", error);
-      toast({
-        title: "Logout failed",
-        description: "There was an error logging out",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleExampleClick = (example: string) => {
-    setSelectedExample(example);
-    // Reset after a short delay to allow for future clicks
-    setTimeout(() => setSelectedExample(""), 100);
-  };
-
-  return (
-    <SidebarProvider className="h-screen overflow-hidden">
-      <div className="h-screen flex w-full overflow-hidden">
-        <SessionsSidebar
-          sessions={sessions}
-          sessionId={sessionId}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          favoriteSessionIds={favoriteSessionIds}
-          archivedSessionIds={archivedSessionIds}
-          onLoadSession={loadSession}
-          onStartRename={startRenameSession}
-          isRenaming={isRenamingSession}
-          setIsRenaming={setIsRenamingSession}
-          onConfirmRename={confirmRenameSession}
-          onToggleFavorite={toggleFavoriteSession}
-          onToggleArchive={toggleArchiveSession}
-          onDelete={deleteSession}
-          onNewChat={async () => {
-            // keep the “Stop” semantics consistent when starting fresh
-            await cancelActiveGeneration(true, true);
-            setSessionId(null);
-            setMessages([]);
-            setShowResultsPanel(false);
-            setResultsPanelData(null);
-          }}
-          currentUser={currentUser}
-          onLogout={handleLogout}
-        />
-
-        {/* Main Content Area */}
-        <div className="flex-1 flex h-screen overflow-hidden">
-          {/* Chat Section */}
-          <div
-            className={cn(
-              "flex flex-col transition-all duration-300 overflow-hidden",
-              showResultsPanel ? "flex-1" : "w-full"
-            )}
-          >
-            <HeaderBar
-              sessionId={sessionId}
-              sessions={sessions}
-              sessionWarning={sessionWarning}
-              showResultsPanel={showResultsPanel}
-              setShowResultsPanel={setShowResultsPanel}
-            />
-
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto">
-              <ChatThread
-                messages={messages}
-                currentMilestone={currentMilestone}
-                onViewFullResults={handleViewFullResults}
-                onExampleClick={handleExampleClick}
-              />
-            </div>
-
-            {/* Composer */}
-            <div className="flex-shrink-0 bg-background">
-              <MessageComposer
-                onSendMessage={sendMessage}
-                onInputFocus={() => {}}
-                isLoading={isProcessing}
-                webSearchEnabled={webSearchEnabled}
-                onWebSearchToggle={setWebSearchEnabled}
-                initialMessage={selectedExample}
-                onStop={stopGeneration}
-              />
-            </div>
-          </div>
-
-          {/* Results Panel */}
-          {showResultsPanel && (
-            <div className="w-96 border-l bg-background flex-shrink-0 h-full overflow-hidden">
-              <EnhancedResultsPanel
-                isVisible={showResultsPanel}
-                onClose={() => setShowResultsPanel(false)}
-                resultData={resultsPanelData}
-                resultType={resultsPanelType}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Results Modal */}
-        <ResultsModal
-          isOpen={showModal}
-          onClose={() => setShowModal(false)}
-          title={
-            selectedResultData
-              ? `${
-                  selectedResultType === "embedding"
-                    ? "Internal Knowledge"
-                    : selectedResultType!.charAt(0).toUpperCase() +
-                      selectedResultType!.slice(1)
-                } Results`
-              : "Results"
-          }
-          allResults={selectedResultData || { sql: [], embedding: [], web: [] }}
-          activeTab={selectedResultType as "sql" | "embedding" | "web"}
-        />
-      </div>
-    </SidebarProvider>
-  );
-};
-
-export default Chat;
+react-dom.development.js:29895 Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+deprecations.ts:9  ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+warnOnce @ deprecations.ts:9
+logDeprecation @ deprecations.ts:14
+logV6DeprecationWarnings @ deprecations.ts:26
+(anonymous) @ index.tsx:816
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+performSyncWorkOnRoot @ react-dom.development.js:26115
+flushSyncCallbacks @ react-dom.development.js:12042
+commitRootImpl @ react-dom.development.js:26998
+commitRoot @ react-dom.development.js:26721
+finishConcurrentRender @ react-dom.development.js:26020
+performConcurrentWorkOnRoot @ react-dom.development.js:25848
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
+deprecations.ts:9  ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+warnOnce @ deprecations.ts:9
+logDeprecation @ deprecations.ts:14
+logV6DeprecationWarnings @ deprecations.ts:37
+(anonymous) @ index.tsx:816
+commitHookEffectListMount @ react-dom.development.js:23189
+commitPassiveMountOnFiber @ react-dom.development.js:24965
+commitPassiveMountEffects_complete @ react-dom.development.js:24930
+commitPassiveMountEffects_begin @ react-dom.development.js:24917
+commitPassiveMountEffects @ react-dom.development.js:24905
+flushPassiveEffectsImpl @ react-dom.development.js:27078
+flushPassiveEffects @ react-dom.development.js:27023
+performSyncWorkOnRoot @ react-dom.development.js:26115
+flushSyncCallbacks @ react-dom.development.js:12042
+commitRootImpl @ react-dom.development.js:26998
+commitRoot @ react-dom.development.js:26721
+finishConcurrentRender @ react-dom.development.js:26020
+performConcurrentWorkOnRoot @ react-dom.development.js:25848
+workLoop @ scheduler.development.js:266
+flushWork @ scheduler.development.js:239
+performWorkUntilDeadline @ scheduler.development.js:533
+AuthContext.tsx:69 Checking user login, token exists: true
+AuthContext.tsx:80 Verifying token...
+[NEW] Explain Console errors by using Copilot in Edge: click
+         
+         to explain an error. 
+        Learn more
+        Don't show again
+AuthContext.tsx:82 User data retrieved: {id: 'vhany', name: 'Verena Hany', email: 'vhany@eand.com', username: 'vhany', first_name: 'Verena', …}department: "e& UAE/Technology & IT"email: "vhany@eand.com"first_name: "Verena"id: "vhany"last_name: "Hany"name: "Verena Hany"title: ""user_image: "default.png"username: "vhany"[[Prototype]]: Objectconstructor: ƒ Object()hasOwnProperty: ƒ hasOwnProperty()isPrototypeOf: ƒ isPrototypeOf()propertyIsEnumerable: ƒ propertyIsEnumerable()toLocaleString: ƒ toLocaleString()toString: ƒ toString()valueOf: ƒ valueOf()__defineGetter__: ƒ __defineGetter__()__defineSetter__: ƒ __defineSetter__()__lookupGetter__: ƒ __lookupGetter__()__lookupSetter__: ƒ __lookupSetter__()__proto__: (...)get __proto__: ƒ __proto__()set __proto__: ƒ __proto__()
+Chat.tsx:443 📦 Raw chunk received: [BOT_TYPE:web_search]
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: Based on the collected
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  data,
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  there are
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  no specific
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  details available
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  about the
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  latest consumer
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  plans from
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  e&
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  UAE.
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  The search
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  results primarily
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  focus on
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  business solutions
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  and technological
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  advancements such
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  as 
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 5G
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  network slicing
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  and AI
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  skilling
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  programs.
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Here are
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  some highlights
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: :
+
+1
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: . **
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 5G
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Network S
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: licing for
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Businesses**
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: : e
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: & UAE
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  has launched
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  the region
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 's first
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  commercial 
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 5G
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  network slicing
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  product for
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  business customers
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: , offering
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  tailored,
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  ultra-re
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: liable connectivity
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: . [
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: Read more
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ](https
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ://www
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: .eand
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: .com/en
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: /news/
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 20-
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 5-
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 25-e
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: and-
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: uae
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -unle
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ashes-region
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -s-first
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -5
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: g-s
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: licing-
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: technology.html
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: #r
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: =qP
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ScU
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: _3
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ).
+
+2
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: . **AI Sk
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: illing Programme
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: **:
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  e&
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  UAE has
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  introduced an
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  AI sk
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: illing program supported by
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Microsoft,
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  aimed at
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  enhancing operational
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  efficiency for
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  business users
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  in various
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  sectors.
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  [Read
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  more](
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: https://
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: www.e
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: and.com
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: /en/news
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: /25
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -03
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -25
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -eand
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -launch-ai
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -skilling
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -programme
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: .html#
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: r=
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ZIg
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: kd_
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 2).
+
+
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 3.
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  **Next
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Generation Connectivity
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  Platform**: This
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  platform includes
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  TrustNet
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: , 
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 5G
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: , and
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  AI Net
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  to provide
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  seamless network
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  connectivity for
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  corporate branches
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  and data
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  centers.
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  [Read
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  more](
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: https://
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: www.e
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: and.com
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: /en/news
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: /18
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -oct
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -24
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -eand
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -launches
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -next-generation
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -connectivity
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -platform.html
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: #r
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: =OI
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: wTv
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: _6
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: ).
+
+For
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  consumer plans
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: , I
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  recommend checking
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  the official
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  e&
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  UAE website
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  or contacting
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  their customer
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  service for
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  the most
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  up-to
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: -date information
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: .
+
+Would
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  you like
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  me to
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  help with
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  anything else
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  or search
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  for specific
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received:  consumer plans?
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: 
+[WEB_RESULTS][{"table": "web_results", "query": "What are the latest eand UAE plans?", "results": {
+Chat.tsx:446 🎯 Parsed events: 0 []
+Chat.tsx:443 📦 Raw chunk received: gest and most trusted business setup advisory firms. Creative Zone's registration professionals have
+Chat.tsx:446 🎯 Parsed events: 0 []
